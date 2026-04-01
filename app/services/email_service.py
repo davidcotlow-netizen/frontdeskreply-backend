@@ -24,8 +24,8 @@ def send_email(
         msg["To"] = to_email
         msg["Subject"] = subject
         msg.attach(MIMEText(body, "plain"))
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-            server.login(settings.gmail_user, settings.gmail_app_password)
+        with smtplib.SMTP("smtp.gmail.com", 587) as server:
+            server.starttls(); server.login(settings.gmail_user, settings.gmail_app_password)
             server.sendmail(settings.gmail_user, to_email, msg.as_string())
         return {"status": "sent", "to": to_email, "method": "gmail_smtp"}
     except Exception as e:
