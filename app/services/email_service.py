@@ -1,8 +1,9 @@
 import logging
 import httpx
-from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+RESEND_API_KEY = "re_HgGkxGUj_LTzdQZVT43TyDPnPdgnTZmJU"
 
 def send_email(
     to_email: str,
@@ -11,11 +12,10 @@ def send_email(
     customer_name: str = "",
     business_id: str = "",
 ) -> dict:
-    settings = get_settings()
     try:
         response = httpx.post(
             "https://api.resend.com/emails",
-            headers={"Authorization": f"Bearer {settings.resend_api_key}", "Content-Type": "application/json"},
+            headers={"Authorization": f"Bearer {RESEND_API_KEY}", "Content-Type": "application/json"},
             json={"from": "FrontdeskReply <hello@frontdeskreply.com>", "to": [to_email], "subject": subject, "text": body},
             timeout=10.0
         )
