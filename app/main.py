@@ -14,8 +14,8 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Lock down to specific domains in production
-    allow_credentials=False,
+    allow_origins=["https://app.frontdeskreply.com"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
