@@ -1,10 +1,11 @@
+import os
 import logging
 import httpx
 from app.core.database import get_db
 
 logger = logging.getLogger(__name__)
 
-RESEND_API_KEY = "re_HgGkxGUj_LTzdQZVT43TyDPnPdgnTZmJU"
+RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
 
 def _get_business_profile(business_id: str) -> dict:
     defaults = {"name": "Our Team", "phone": "", "address": "", "hours": [], "instagram_url": "", "facebook_url": "", "twitter_url": "", "owner_email": ""}
