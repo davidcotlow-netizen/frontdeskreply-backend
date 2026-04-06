@@ -91,11 +91,13 @@ async def get_lead_database(business_id: str):
     """MUST be before /{conversation_id} to avoid route conflict."""
     db = get_db()
 
-    res = db.table("inbound_messages").select(
-        "sender_name, sender_email, sender_phone, intent, received_at"
-    ).eq("business_id", business_id).order("received_at", desc=False).execute()
-
-    messages = res.data or []
+    try:
+        res = db.table("inbound_messages").select(
+            "sender_name, sender_email, sender_phone, intent, received_at"
+        ).eq("business_id", business_id).order("received_at", desc=False).execute()
+        messages = res.data or []
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
     leads: dict = {}
 
     for m in messages:
@@ -144,13 +146,17 @@ async def get_lead_database(business_id: str):
 @router.get("/{conversation_id}")
 async def get_conversation(conversation_id: str):
     db = get_db()
-    res = db.table("conversations").select(
-        "*, contacts(*), channels(channel_type, external_identifier)"
-    ).eq("id", conversation_id).maybe_single().execute()
+    try:
+        res = db.table("conversations").select(
+            "*, contacts(*), channels(channel_type, external_identifier)"
+        ).eq("id", conversation_id).execute()
+        data = res.data[0] if res.data else None
+    except Exception:
+        data = None
 
-    if not res.data:
+    if not data:
         raise HTTPException(status_code=404, detail="Conversation not found")
-    return res.data
+    return data
 
 
 @router.get("/{conversation_id}/messages")
