@@ -28,29 +28,6 @@ async def list_conversations(
     return {"conversations": res.data, "page": page}
 
 
-@router.get("/{conversation_id}")
-async def get_conversation(conversation_id: str):
-    db = get_db()
-    res = db.table("conversations").select(
-        "*, contacts(*), channels(channel_type, external_identifier)"
-    ).eq("id", conversation_id).maybe_single().execute()
-
-    if not res.data:
-        raise HTTPException(status_code=404, detail="Conversation not found")
-    return res.data
-
-
-@router.get("/{conversation_id}/messages")
-async def get_conversation_messages(conversation_id: str):
-    """All messages in a conversation — used by Claude for draft context."""
-    db = get_db()
-    res = db.table("inbound_messages").select(
-        "*, response_drafts!message_id(draft_body), sent_responses!message_id(body_sent, sent_at)"
-    ).eq("conversation_id", conversation_id).order("received_at", desc=False).execute()
-
-    return {"messages": res.data or [], "conversation_id": conversation_id}
-
-
 @router.get("/sent")
 async def get_sent_messages(
     business_id: str,
@@ -58,6 +35,10 @@ async def get_sent_messages(
     offset: int = 0,
     period: str = "month"
 ):
+    """
+    Returns all sent responses for a business with full customer and message context.
+    MUST be defined before /{conversation_id} to prevent route conflict.
+    """
     db = get_db()
     from datetime import timedelta
 
@@ -106,6 +87,29 @@ async def get_sent_messages(
         })
 
     return {"sent": result, "total": len(result)}
+
+
+@router.get("/{conversation_id}")
+async def get_conversation(conversation_id: str):
+    db = get_db()
+    res = db.table("conversations").select(
+        "*, contacts(*), channels(channel_type, external_identifier)"
+    ).eq("id", conversation_id).maybe_single().execute()
+
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return res.data
+
+
+@router.get("/{conversation_id}/messages")
+async def get_conversation_messages(conversation_id: str):
+    """All messages in a conversation — used by Claude for draft context."""
+    db = get_db()
+    res = db.table("inbound_messages").select(
+        "*, response_drafts!message_id(draft_body), sent_responses!message_id(body_sent, sent_at)"
+    ).eq("conversation_id", conversation_id).order("received_at", desc=False).execute()
+
+    return {"messages": res.data or [], "conversation_id": conversation_id}
 
 
 @router.post("/{conversation_id}/close")
