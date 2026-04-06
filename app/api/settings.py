@@ -49,7 +49,7 @@ async def get_profile(business_id: str):
 @router.patch("/profile")
 async def update_profile(business_id: str, body: BusinessProfileUpdate):
     db = get_db()
-    updates = {k: v for k, v in body.dict().items() if v is not None}
+    updates = {k: v for k, v in body.dict().items() if v is not None and v != ""}
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
     res = db.table("businesses").update(updates).eq("id", business_id).execute()
