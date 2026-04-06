@@ -53,7 +53,7 @@ def process_inbound_message(self, message_id: str):
         plan_tier = plan_res.data["plan_tier"] if plan_res.data else "starter"
 
         auto_respond_enabled = bool(
-            business.get("auto_respond_enabled", False)
+            plan_res.data.get("auto_send_enabled", False) if plan_res.data else False
         )
 
         # ── 6. Fetch conversation history ────────────────────────────────
