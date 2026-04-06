@@ -58,10 +58,6 @@ async def get_sent_messages(
     offset: int = 0,
     period: str = "month"
 ):
-    """
-    Returns all sent responses for a business with full customer and message context.
-    Used by the Sent Messages / Conversation History page in the dashboard.
-    """
     db = get_db()
     from datetime import timedelta
 
@@ -76,9 +72,9 @@ async def get_sent_messages(
         start = (now - timedelta(days=30)).isoformat()
 
     sent_res = db.table("sent_responses").select(
-        "id, message_id, body_sent, send_method, sent_by, auto_sent, created_at"
-    ).eq("business_id", business_id).gte("created_at", start).order(
-        "created_at", desc=True
+        "id, message_id, body_sent, send_method, sent_by, auto_sent, sent_at"
+    ).eq("business_id", business_id).gte("sent_at", start).order(
+        "sent_at", desc=True
     ).range(offset, offset + limit - 1).execute()
 
     sent = sent_res.data or []
@@ -97,7 +93,7 @@ async def get_sent_messages(
         msg = msgs_by_id.get(s.get("message_id"), {})
         result.append({
             "id": s["id"],
-            "sent_at": s["created_at"],
+            "sent_at": s["sent_at"],
             "auto_sent": s.get("auto_sent", False),
             "send_method": s.get("send_method", "email"),
             "body_sent": s.get("body_sent", ""),
