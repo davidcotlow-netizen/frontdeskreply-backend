@@ -51,6 +51,67 @@ async def get_conversation_messages(conversation_id: str):
     return {"messages": res.data or [], "conversation_id": conversation_id}
 
 
+@router.get("/sent")
+async def get_sent_messages(
+    business_id: str,
+    limit: int = 50,
+    offset: int = 0,
+    period: str = "month"
+):
+    """
+    Returns all sent responses for a business with full customer and message context.
+    Used by the Sent Messages / Conversation History page in the dashboard.
+    """
+    db = get_db()
+    from datetime import timedelta
+
+    now = datetime.now(timezone.utc)
+    if period == "today":
+        start = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+    elif period == "week":
+        start = (now - timedelta(days=7)).isoformat()
+    elif period == "month":
+        start = (now - timedelta(days=30)).isoformat()
+    else:
+        start = (now - timedelta(days=30)).isoformat()
+
+    sent_res = db.table("sent_responses").select(
+        "id, message_id, body_sent, send_method, sent_by, auto_sent, created_at"
+    ).eq("business_id", business_id).gte("created_at", start).order(
+        "created_at", desc=True
+    ).range(offset, offset + limit - 1).execute()
+
+    sent = sent_res.data or []
+    if not sent:
+        return {"sent": [], "total": 0}
+
+    message_ids = [s["message_id"] for s in sent if s.get("message_id")]
+    msgs_res = db.table("inbound_messages").select(
+        "id, sender_name, sender_email, sender_phone, intent, body, received_at"
+    ).in_("id", message_ids).execute()
+
+    msgs_by_id = {m["id"]: m for m in (msgs_res.data or [])}
+
+    result = []
+    for s in sent:
+        msg = msgs_by_id.get(s.get("message_id"), {})
+        result.append({
+            "id": s["id"],
+            "sent_at": s["created_at"],
+            "auto_sent": s.get("auto_sent", False),
+            "send_method": s.get("send_method", "email"),
+            "body_sent": s.get("body_sent", ""),
+            "customer_name": msg.get("sender_name", "Unknown"),
+            "customer_email": msg.get("sender_email"),
+            "customer_phone": msg.get("sender_phone"),
+            "customer_message": msg.get("body", ""),
+            "intent": msg.get("intent", "unknown"),
+            "received_at": msg.get("received_at"),
+        })
+
+    return {"sent": result, "total": len(result)}
+
+
 @router.post("/{conversation_id}/close")
 async def close_conversation(conversation_id: str, user_id: str):
     db = get_db()
