@@ -28,67 +28,6 @@ async def list_conversations(
     return {"conversations": res.data, "page": page}
 
 
-@router.get("/sent")
-async def get_sent_messages(
-    business_id: str,
-    limit: int = 50,
-    offset: int = 0,
-    period: str = "month"
-):
-    """
-    Returns all sent responses for a business with full customer and message context.
-    MUST be defined before /{conversation_id} to prevent route conflict.
-    """
-    db = get_db()
-    from datetime import timedelta
-
-    now = datetime.now(timezone.utc)
-    if period == "today":
-        start = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
-    elif period == "week":
-        start = (now - timedelta(days=7)).isoformat()
-    elif period == "month":
-        start = (now - timedelta(days=30)).isoformat()
-    else:
-        start = (now - timedelta(days=30)).isoformat()
-
-    sent_res = db.table("sent_responses").select(
-        "id, message_id, body_sent, send_method, sent_by, auto_sent, sent_at"
-    ).eq("business_id", business_id).gte("sent_at", start).order(
-        "sent_at", desc=True
-    ).range(offset, offset + limit - 1).execute()
-
-    sent = sent_res.data or []
-    if not sent:
-        return {"sent": [], "total": 0}
-
-    message_ids = [s["message_id"] for s in sent if s.get("message_id")]
-    msgs_res = db.table("inbound_messages").select(
-        "id, sender_name, sender_email, sender_phone, intent, body, received_at"
-    ).in_("id", message_ids).execute()
-
-    msgs_by_id = {m["id"]: m for m in (msgs_res.data or [])}
-
-    result = []
-    for s in sent:
-        msg = msgs_by_id.get(s.get("message_id"), {})
-        result.append({
-            "id": s["id"],
-            "sent_at": s["sent_at"],
-            "auto_sent": s.get("auto_sent", False),
-            "send_method": s.get("send_method", "email"),
-            "body_sent": s.get("body_sent", ""),
-            "customer_name": msg.get("sender_name", "Unknown"),
-            "customer_email": msg.get("sender_email"),
-            "customer_phone": msg.get("sender_phone"),
-            "customer_message": msg.get("body", ""),
-            "intent": msg.get("intent", "unknown"),
-            "received_at": msg.get("received_at"),
-        })
-
-    return {"sent": result, "total": len(result)}
-
-
 @router.get("/{conversation_id}")
 async def get_conversation(conversation_id: str):
     db = get_db()
@@ -131,3 +70,72 @@ async def close_conversation(conversation_id: str, user_id: str):
     }).execute()
 
     return {"status": "closed", "closed_at": now}
+
+
+@router.get("/leads")
+async def get_lead_database(business_id: str):
+    """
+    Returns a deduplicated master lead database for a business.
+    Groups all inbound messages by sender email/phone to create unique lead records.
+    """
+    db = get_db()
+
+    res = db.table("inbound_messages").select(
+        "sender_name, sender_email, sender_phone, intent, received_at"
+    ).eq("business_id", business_id).order("received_at", desc=False).execute()
+
+    messages = res.data or []
+
+    # Deduplicate by email first, then phone
+    leads: dict[str, dict] = {}
+
+    for m in messages:
+        email = (m.get("sender_email") or "").strip().lower() or None
+        phone = (m.get("sender_phone") or "").strip() or None
+        name = m.get("sender_name") or "Unknown"
+        intent = m.get("intent") or "unknown"
+        received = m.get("received_at") or ""
+
+        # Use email as primary key, fallback to phone, fallback to name
+        key = email or phone or name
+
+        if key not in leads:
+            leads[key] = {
+                "id": key,
+                "name": name,
+                "email": email,
+                "phone": phone,
+                "first_contact": received,
+                "last_contact": received,
+                "message_count": 0,
+                "intents": [],
+            }
+
+        lead = leads[key]
+        lead["message_count"] += 1
+        lead["last_contact"] = received
+
+        # Update name if we get a better one
+        if name and name != "Unknown" and lead["name"] == "Unknown":
+            lead["name"] = name
+
+        # Update contact info if missing
+        if email and not lead["email"]:
+            lead["email"] = email
+        if phone and not lead["phone"]:
+            lead["phone"] = phone
+
+        if intent and intent not in lead["intents"]:
+            lead["intents"].append(intent)
+
+    # Add top_intent (most common)
+    from collections import Counter
+    result = []
+    for lead in leads.values():
+        top = lead["intents"][0] if lead["intents"] else "unknown"
+        result.append({**lead, "top_intent": top})
+
+    # Sort by last contact descending
+    result.sort(key=lambda x: x["last_contact"], reverse=True)
+
+    return {"leads": result, "total": len(result)}
