@@ -1,4 +1,5 @@
 import stripe
+import httpx
 from fastapi import APIRouter, HTTPException, Request
 from app.core.config import get_settings
 from app.core.database import get_db
@@ -18,15 +19,54 @@ PLAN_LIMITS = {
 }
 
 
+async def sync_plan_to_clerk(clerk_secret_key: str, business_id: str, plan_tier: str):
+    """Update Clerk user publicMetadata with current plan tier."""
+    try:
+        async with httpx.AsyncClient() as client:
+            # Fetch all users and find the one with matching business_id
+            r = await client.get(
+                "https://api.clerk.com/v1/users",
+                headers={"Authorization": f"Bearer {clerk_secret_key}"},
+                params={"limit": 100},
+            )
+            if r.status_code != 200:
+                return
+            users = r.json()
+            target_user = None
+            for u in users:
+                meta = u.get("public_metadata", {})
+                if meta.get("business_id") == business_id:
+                    target_user = u
+                    break
+            if not target_user:
+                return
+            # Merge plan into existing publicMetadata
+            existing_meta = target_user.get("public_metadata", {})
+            await client.patch(
+                f"https://api.clerk.com/v1/users/{target_user['id']}",
+                headers={
+                    "Authorization": f"Bearer {clerk_secret_key}",
+                    "Content-Type": "application/json",
+                },
+                json={"public_metadata": {**existing_meta, "plan": plan_tier}},
+            )
+    except Exception:
+        pass  # Don't fail the webhook if Clerk sync fails
+
+
 @router.get("/plan")
 async def get_plan(business_id: str):
     db = get_db()
-    res = db.table("subscription_plans").select("*").eq(
-        "business_id", business_id
-    ).eq("status", "active").maybe_single().execute()
-    if not res.data:
+    try:
+        res = db.table("subscription_plans").select("*").eq(
+            "business_id", business_id
+        ).eq("status", "active").execute()
+        data = res.data[0] if res.data else None
+    except Exception:
+        data = None
+    if not data:
         return {"plan_tier": "starter", "conversations_used": 0, "monthly_limit": 300}
-    return res.data
+    return data
 
 
 @router.post("/create-checkout")
@@ -54,14 +94,18 @@ async def billing_portal(business_id: str, return_url: str):
     stripe.api_key = settings.stripe_secret_key
     db = get_db()
 
-    plan_res = db.table("subscription_plans").select("stripe_subscription_id").eq(
-        "business_id", business_id
-    ).eq("status", "active").maybe_single().execute()
+    try:
+        plan_res = db.table("subscription_plans").select("stripe_subscription_id").eq(
+            "business_id", business_id
+        ).eq("status", "active").execute()
+        plan_data = plan_res.data[0] if plan_res.data else None
+    except Exception:
+        plan_data = None
 
-    if not plan_res.data:
+    if not plan_data:
         raise HTTPException(status_code=404, detail="No active subscription")
 
-    sub = stripe.Subscription.retrieve(plan_res.data["stripe_subscription_id"])
+    sub = stripe.Subscription.retrieve(plan_data["stripe_subscription_id"])
     portal = stripe.billing_portal.Session.create(
         customer=sub["customer"],
         return_url=return_url,
@@ -89,6 +133,8 @@ async def stripe_webhook(request: Request):
         business_id = data["metadata"].get("business_id")
         plan_tier = data["metadata"].get("plan_tier", "starter")
         limits = PLAN_LIMITS.get(plan_tier, PLAN_LIMITS["starter"])
+
+        # Update Supabase
         db.table("subscription_plans").upsert({
             "business_id": business_id,
             "plan_tier": plan_tier,
@@ -97,6 +143,9 @@ async def stripe_webhook(request: Request):
             "conversations_used": 0,
             **limits,
         }).execute()
+
+        # Sync plan to Clerk publicMetadata
+        await sync_plan_to_clerk(settings.clerk_secret_key, business_id, plan_tier)
 
     elif event["type"] == "invoice.paid":
         sub_id = data.get("subscription")
@@ -112,26 +161,42 @@ async def stripe_webhook(request: Request):
             "stripe_subscription_id", sub_id
         ).execute()
 
+        # Find business_id from Supabase and reset plan in Clerk
+        try:
+            res = db.table("subscription_plans").select("business_id").eq(
+                "stripe_subscription_id", sub_id
+            ).execute()
+            if res.data:
+                await sync_plan_to_clerk(
+                    settings.clerk_secret_key,
+                    res.data[0]["business_id"],
+                    "starter"
+                )
+        except Exception:
+            pass
+
     return {"status": "ok"}
+
 
 @router.get("/history")
 async def billing_history(business_id: str):
-    """
-    Fetch invoice history from Stripe for a business.
-    Returns list of paid invoices with amount, date, status, and hosted invoice URL.
-    """
+    """Fetch invoice history from Stripe for a business."""
     settings = get_settings()
     stripe.api_key = settings.stripe_secret_key
     db = get_db()
 
-    plan_res = db.table("subscription_plans").select(
-        "stripe_subscription_id, plan_tier"
-    ).eq("business_id", business_id).eq("status", "active").maybe_single().execute()
+    try:
+        plan_res = db.table("subscription_plans").select(
+            "stripe_subscription_id, plan_tier"
+        ).eq("business_id", business_id).eq("status", "active").execute()
+        plan_data = plan_res.data[0] if plan_res.data else None
+    except Exception:
+        plan_data = None
 
-    if not plan_res.data or not plan_res.data.get("stripe_subscription_id"):
+    if not plan_data or not plan_data.get("stripe_subscription_id"):
         return {"invoices": [], "has_subscription": False}
 
-    sub = stripe.Subscription.retrieve(plan_res.data["stripe_subscription_id"])
+    sub = stripe.Subscription.retrieve(plan_data["stripe_subscription_id"])
     customer_id = sub["customer"]
 
     invoices = stripe.Invoice.list(customer=customer_id, limit=24)
@@ -147,7 +212,7 @@ async def billing_history(business_id: str):
             "amount": inv["amount_paid"] / 100,
             "currency": inv.get("currency", "usd").upper(),
             "status": inv["status"],
-            "plan_tier": plan_res.data.get("plan_tier", "starter"),
+            "plan_tier": plan_data.get("plan_tier", "starter"),
             "invoice_url": inv.get("hosted_invoice_url", ""),
             "invoice_pdf": inv.get("invoice_pdf", ""),
             "period_start": inv.get("period_start"),
