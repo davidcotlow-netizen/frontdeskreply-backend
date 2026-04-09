@@ -314,6 +314,48 @@ async def get_chat_history(
     return {"conversations": result, "total": len(result)}
 
 
+@router.post("/leads/{lead_id}/notes")
+async def add_lead_note(lead_id: str, body: dict):
+    """Add an internal note to a lead."""
+    db = get_db()
+    note = body.get("note", "").strip()
+    if not note:
+        raise HTTPException(status_code=400, detail="Note cannot be empty")
+
+    # Store notes in the contact's metadata via a notes table approach
+    # We'll use the audit_logs table with entity_type="lead_note"
+    db.table("audit_logs").insert({
+        "entity_type": "lead_note",
+        "entity_id": lead_id,
+        "action": "note_added",
+        "performed_by": body.get("user_id", "owner"),
+        "metadata_json": {"note": note, "created_at": datetime.now(timezone.utc).isoformat()},
+    }).execute()
+    return {"status": "saved", "lead_id": lead_id}
+
+
+@router.get("/leads/{lead_id}/notes")
+async def get_lead_notes(lead_id: str):
+    """Get all internal notes for a lead."""
+    db = get_db()
+    res = db.table("audit_logs").select(
+        "id, metadata_json, performed_by, created_at"
+    ).eq("entity_type", "lead_note").eq("entity_id", lead_id).order(
+        "created_at", desc=True
+    ).execute()
+
+    notes = []
+    for row in (res.data or []):
+        meta = row.get("metadata_json") or {}
+        notes.append({
+            "id": row["id"],
+            "note": meta.get("note", ""),
+            "created_at": meta.get("created_at") or row.get("created_at", ""),
+            "author": row.get("performed_by", "owner"),
+        })
+    return {"notes": notes}
+
+
 @router.post("/leads/send-email")
 async def send_bulk_email(body: dict):
     """Send an email to selected leads from the dashboard."""

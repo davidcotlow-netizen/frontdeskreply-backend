@@ -81,6 +81,23 @@ async def dashboard_summary(business_id: str, period: str = "today"):
     # Conversion rate: conversations that captured an email
     conversion_rate = round((leads_with_email / total_conversations) * 100) if total_conversations > 0 else 0
 
+    # Chatbot accuracy: % of AI responses that didn't contain fallback/phone-redirect language
+    confident_responses = 0
+    total_ai_responses = 0
+    fallback_phrases = ["give us a call", "call us at", "reach out to", "contact us directly",
+                        "let me connect you", "for the best answer"]
+    for session in sessions:
+        msgs_res = db.table("chat_messages").select("content, role").eq(
+            "session_id", session["id"]
+        ).eq("role", "ai").execute()
+        for msg in (msgs_res.data or []):
+            total_ai_responses += 1
+            content_lower = (msg.get("content") or "").lower()
+            if not any(phrase in content_lower for phrase in fallback_phrases):
+                confident_responses += 1
+
+    accuracy_rate = round((confident_responses / total_ai_responses) * 100) if total_ai_responses > 0 else 0
+
     return {
         "total_conversations": total_conversations,
         "total_messages": total_messages,
@@ -92,6 +109,7 @@ async def dashboard_summary(business_id: str, period: str = "today"):
         "leads_with_email": leads_with_email,
         "leads_with_phone": leads_with_phone,
         "conversion_rate": conversion_rate,
+        "accuracy_rate": accuracy_rate,
         "period": period,
     }
 
