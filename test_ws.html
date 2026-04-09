@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FrontdeskReply — WebSocket Chat Test</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #1a1a2e; color: #e0e0e0; padding: 20px; }
+        h1 { color: #E8714A; margin-bottom: 20px; font-size: 1.4rem; }
+        .container { max-width: 600px; margin: 0 auto; }
+        .config { background: #16213e; padding: 16px; border-radius: 8px; margin-bottom: 16px; }
+        .config label { display: block; margin-bottom: 6px; font-size: 0.85rem; color: #aaa; }
+        .config input { width: 100%; padding: 8px 12px; border: 1px solid #333; border-radius: 6px; background: #0f3460; color: #fff; margin-bottom: 12px; font-size: 0.9rem; }
+        .config button { padding: 10px 20px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.9rem; margin-right: 8px; }
+        .btn-connect { background: #E8714A; color: #fff; }
+        .btn-connect:hover { background: #d4613e; }
+        .btn-disconnect { background: #555; color: #fff; }
+        .btn-escalate { background: #e74c3c; color: #fff; }
+        .status { padding: 8px 12px; border-radius: 6px; margin-bottom: 16px; font-size: 0.85rem; }
+        .status.connected { background: #1a4d2e; color: #4ade80; }
+        .status.disconnected { background: #4d1a1a; color: #f87171; }
+        .status.connecting { background: #4d3a1a; color: #fbbf24; }
+        .chat-window { background: #16213e; border-radius: 8px; height: 400px; overflow-y: auto; padding: 16px; margin-bottom: 12px; }
+        .message { margin-bottom: 10px; padding: 8px 12px; border-radius: 8px; max-width: 85%; font-size: 0.9rem; line-height: 1.4; }
+        .message.visitor { background: #E8714A; color: #fff; margin-left: auto; text-align: right; }
+        .message.ai { background: #0f3460; color: #e0e0e0; }
+        .message.system { background: #333; color: #aaa; font-style: italic; text-align: center; margin: 0 auto; font-size: 0.8rem; }
+        .message.human { background: #1a4d2e; color: #4ade80; }
+        .typing { color: #aaa; font-style: italic; padding: 4px 12px; font-size: 0.85rem; }
+        .input-row { display: flex; gap: 8px; }
+        .input-row input { flex: 1; padding: 10px 14px; border: 1px solid #333; border-radius: 6px; background: #0f3460; color: #fff; font-size: 0.9rem; }
+        .input-row button { padding: 10px 20px; background: #E8714A; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; }
+        .log { background: #0a0a1a; padding: 12px; border-radius: 8px; margin-top: 16px; max-height: 200px; overflow-y: auto; font-family: monospace; font-size: 0.75rem; color: #888; }
+        .log div { margin-bottom: 2px; }
+        .log .sent { color: #E8714A; }
+        .log .received { color: #4ade80; }
+        .log .error { color: #f87171; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>FrontdeskReply WebSocket Chat Test</h1>
+
+        <div class="config">
+            <label>WebSocket URL</label>
+            <input type="text" id="wsUrl" value="ws://localhost:8000/ws/chat/YOUR_BUSINESS_ID_HERE" />
+            <label>Visitor Name</label>
+            <input type="text" id="visitorName" value="Test Visitor" />
+            <label>Visitor Email</label>
+            <input type="text" id="visitorEmail" value="test@example.com" />
+            <button class="btn-connect" onclick="connect()">Connect</button>
+            <button class="btn-disconnect" onclick="disconnect()">Disconnect</button>
+            <button class="btn-escalate" onclick="escalate()">Escalate</button>
+        </div>
+
+        <div class="status disconnected" id="status">Disconnected</div>
+
+        <div class="chat-window" id="chat"></div>
+
+        <div class="input-row">
+            <input type="text" id="messageInput" placeholder="Type a message..." onkeydown="if(event.key==='Enter')sendMessage()" disabled />
+            <button onclick="sendMessage()" id="sendBtn" disabled>Send</button>
+        </div>
+
+        <div class="log" id="log"></div>
+    </div>
+
+    <script>
+        let ws = null;
+        let sessionId = null;
+        let currentAiMessage = null;
+
+        const chat = document.getElementById('chat');
+        const log = document.getElementById('log');
+        const status = document.getElementById('status');
+        const msgInput = document.getElementById('messageInput');
+        const sendBtn = document.getElementById('sendBtn');
+
+        function addLog(text, cls = '') {
+            const div = document.createElement('div');
+            div.className = cls;
+            div.textContent = `[${new Date().toLocaleTimeString()}] ${text}`;
+            log.appendChild(div);
+            log.scrollTop = log.scrollHeight;
+        }
+
+        function addMessage(text, type) {
+            // Remove typing indicator if present
+            const typing = chat.querySelector('.typing');
+            if (typing) typing.remove();
+
+            const div = document.createElement('div');
+            div.className = `message ${type}`;
+            div.textContent = text;
+            chat.appendChild(div);
+            chat.scrollTop = chat.scrollHeight;
+            return div;
+        }
+
+        function showTyping() {
+            if (!chat.querySelector('.typing')) {
+                const div = document.createElement('div');
+                div.className = 'typing';
+                div.textContent = 'AI is typing...';
+                chat.appendChild(div);
+                chat.scrollTop = chat.scrollHeight;
+            }
+        }
+
+        function setStatus(text, cls) {
+            status.textContent = text;
+            status.className = `status ${cls}`;
+        }
+
+        function connect() {
+            const url = document.getElementById('wsUrl').value;
+            setStatus('Connecting...', 'connecting');
+            addLog(`Connecting to ${url}`, 'sent');
+
+            ws = new WebSocket(url);
+
+            ws.onopen = () => {
+                setStatus('Connected — sending init...', 'connecting');
+                addLog('WebSocket opened', 'received');
+
+                // Send init frame
+                const init = {
+                    type: 'init',
+                    visitor_name: document.getElementById('visitorName').value,
+                    visitor_email: document.getElementById('visitorEmail').value,
+                };
+                if (sessionId) init.session_id = sessionId;
+                ws.send(JSON.stringify(init));
+                addLog(`Sent: ${JSON.stringify(init)}`, 'sent');
+
+                msgInput.disabled = false;
+                sendBtn.disabled = false;
+            };
+
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                addLog(`Recv: ${JSON.stringify(data).substring(0, 200)}`, 'received');
+
+                switch (data.type) {
+                    case 'session_created':
+                        sessionId = data.session_id;
+                        setStatus(`Connected — Session: ${sessionId.substring(0, 8)}...`, 'connected');
+                        break;
+                    case 'greeting':
+                        addMessage(data.content, 'ai');
+                        break;
+                    case 'typing':
+                        showTyping();
+                        break;
+                    case 'ai_chunk':
+                        // Remove typing indicator
+                        const typing = chat.querySelector('.typing');
+                        if (typing) typing.remove();
+                        // Append to current AI message bubble
+                        if (!currentAiMessage) {
+                            currentAiMessage = addMessage('', 'ai');
+                        }
+                        currentAiMessage.textContent += data.content;
+                        chat.scrollTop = chat.scrollHeight;
+                        break;
+                    case 'ai_done':
+                        currentAiMessage = null;
+                        addLog(`AI confidence: ${(data.confidence * 100).toFixed(0)}%`, 'received');
+                        break;
+                    case 'human_message':
+                        addMessage(data.content, 'human');
+                        break;
+                    case 'human_takeover':
+                    case 'human_handback':
+                    case 'system':
+                        addMessage(data.content, 'system');
+                        break;
+                    case 'error':
+                        addMessage(`Error: ${data.content}`, 'system');
+                        addLog(`Error: ${data.content}`, 'error');
+                        break;
+                    case 'session_ended':
+                        addMessage(data.content, 'system');
+                        break;
+                    case 'ping':
+                        ws.send(JSON.stringify({ type: 'pong' }));
+                        break;
+                }
+            };
+
+            ws.onclose = (event) => {
+                setStatus(`Disconnected (code: ${event.code})`, 'disconnected');
+                addLog(`WebSocket closed: code=${event.code} reason=${event.reason}`, 'error');
+                msgInput.disabled = true;
+                sendBtn.disabled = true;
+            };
+
+            ws.onerror = (error) => {
+                addLog(`WebSocket error`, 'error');
+            };
+        }
+
+        function disconnect() {
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+        }
+
+        function sendMessage() {
+            const text = msgInput.value.trim();
+            if (!text || !ws) return;
+
+            const frame = { type: 'message', content: text };
+            ws.send(JSON.stringify(frame));
+            addLog(`Sent: ${JSON.stringify(frame)}`, 'sent');
+            addMessage(text, 'visitor');
+            msgInput.value = '';
+            currentAiMessage = null;
+        }
+
+        function escalate() {
+            if (!ws) return;
+            const frame = { type: 'escalate_request' };
+            ws.send(JSON.stringify(frame));
+            addLog(`Sent: ${JSON.stringify(frame)}`, 'sent');
+        }
+    </script>
+</body>
+</html>

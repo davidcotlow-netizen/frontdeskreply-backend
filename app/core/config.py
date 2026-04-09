@@ -36,6 +36,11 @@ class Settings(BaseSettings):
     # Redis
     redis_url: str = "redis://localhost:6379/0"
 
+    # Live Chat
+    chat_confidence_threshold: float = 0.7
+    chat_session_timeout_minutes: int = 30
+    chat_max_context_messages: int = 20
+
     # App
     app_env: str = "development"
     frontend_url: str = "http://localhost:3000"
