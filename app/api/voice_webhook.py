@@ -46,13 +46,13 @@ async def inbound_call(request: Request):
     # Look up business
     business = get_business_by_twilio_number(to_number)
     if not business:
-        twiml = '<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="Polly.Amy">Sorry, this number is not configured. Goodbye.</Say><Hangup/></Response>'
+        twiml = '<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="Polly.Joanna-Neural">Sorry, this number is not configured. Goodbye.</Say><Hangup/></Response>'
         return Response(content=twiml, media_type="application/xml")
 
     business_id = business["business_id"]
 
     if not check_business_voice_eligible(business_id):
-        twiml = '<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="Polly.Amy">Thank you for calling. Please visit our website for more information. Goodbye.</Say><Hangup/></Response>'
+        twiml = '<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="Polly.Joanna-Neural">Thank you for calling. Please visit our website for more information. Goodbye.</Say><Hangup/></Response>'
         return Response(content=twiml, media_type="application/xml")
 
     config = get_business_chat_config(business_id)
@@ -72,10 +72,10 @@ async def inbound_call(request: Request):
     # Respond with greeting + listen for speech
     twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Gather input="speech" action="/api/v1/voice/respond?session_id={session_id}&amp;business_id={business_id}" method="POST" speechTimeout="2" language="en-US" enhanced="true">
-        <Say voice="Polly.Amy">{greeting}</Say>
+    <Gather input="speech" action="/api/v1/voice/respond?session_id={session_id}&amp;business_id={business_id}" method="POST" speechTimeout="auto" language="en-US" enhanced="true">
+        <Say voice="Polly.Joanna-Neural">{greeting}</Say>
     </Gather>
-    <Say voice="Polly.Amy">I didn't catch that. Goodbye!</Say>
+    <Say voice="Polly.Joanna-Neural">I didn't catch that. Goodbye!</Say>
     <Hangup/>
 </Response>"""
 
@@ -98,10 +98,10 @@ async def respond_to_speech(request: Request):
     if not speech_result:
         twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Gather input="speech" action="/api/v1/voice/respond?session_id={session_id}&amp;business_id={business_id}" method="POST" speechTimeout="2" language="en-US" enhanced="true">
-        <Say voice="Polly.Amy">I'm sorry, I didn't catch that. Could you say that again?</Say>
+    <Gather input="speech" action="/api/v1/voice/respond?session_id={session_id}&amp;business_id={business_id}" method="POST" speechTimeout="auto" language="en-US" enhanced="true">
+        <Say voice="Polly.Joanna-Neural">I'm sorry, I didn't catch that. Could you say that again?</Say>
     </Gather>
-    <Say voice="Polly.Amy">Goodbye!</Say>
+    <Say voice="Polly.Joanna-Neural">Goodbye!</Say>
     <Hangup/>
 </Response>"""
         return Response(content=twiml, media_type="application/xml")
@@ -116,7 +116,7 @@ async def respond_to_speech(request: Request):
         add_call_transcript(session_id=session_id, role="milo", content=farewell)
         twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Say voice="Polly.Amy">{escape_xml(farewell)}</Say>
+    <Say voice="Polly.Joanna-Neural">{escape_xml(farewell)}</Say>
     <Hangup/>
 </Response>"""
         return Response(content=twiml, media_type="application/xml")
@@ -131,13 +131,13 @@ async def respond_to_speech(request: Request):
         if biz_phone:
             twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Say voice="Polly.Amy">{escape_xml(transfer_msg)}</Say>
+    <Say voice="Polly.Joanna-Neural">{escape_xml(transfer_msg)}</Say>
     <Dial>{escape_xml(biz_phone)}</Dial>
 </Response>"""
         else:
             twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Say voice="Polly.Amy">I'm sorry, I don't have a direct number to transfer you to. Please try calling back during business hours. Goodbye!</Say>
+    <Say voice="Polly.Joanna-Neural">I'm sorry, I don't have a direct number to transfer you to. Please try calling back during business hours. Goodbye!</Say>
     <Hangup/>
 </Response>"""
         return Response(content=twiml, media_type="application/xml")
@@ -177,10 +177,10 @@ async def respond_to_speech(request: Request):
     # Speak response and listen for next question
     twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Gather input="speech" action="/api/v1/voice/respond?session_id={session_id}&amp;business_id={business_id}" method="POST" speechTimeout="2" language="en-US" enhanced="true">
-        <Say voice="Polly.Amy">{escape_xml(full_response)}</Say>
+    <Gather input="speech" action="/api/v1/voice/respond?session_id={session_id}&amp;business_id={business_id}" method="POST" speechTimeout="auto" language="en-US" enhanced="true">
+        <Say voice="Polly.Joanna-Neural">{escape_xml(full_response)}</Say>
     </Gather>
-    <Say voice="Polly.Amy">I didn't hear anything. If you need more help, just call back anytime. Goodbye!</Say>
+    <Say voice="Polly.Joanna-Neural">I didn't hear anything. If you need more help, just call back anytime. Goodbye!</Say>
     <Hangup/>
 </Response>"""
 
