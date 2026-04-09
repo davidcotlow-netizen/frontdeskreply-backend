@@ -158,6 +158,50 @@ async def get_lead_database(business_id: str):
     except Exception:
         pass
 
+    # ── 2b. Enrich with call session data ──────────────────────────
+    try:
+        calls_res = db.table("call_sessions").select(
+            "id, caller_phone, caller_name, started_at, duration_seconds"
+        ).eq("business_id", business_id).execute()
+        for c in (calls_res.data or []):
+            phone = (c.get("caller_phone") or "").strip()
+            if not phone:
+                continue
+            # Normalize phone for matching
+            clean_phone = phone.replace("+1", "").replace("+", "").replace("-", "").replace(" ", "").replace("(", "").replace(")", "")
+            # Find matching lead by phone
+            matched = False
+            for key, lead in leads.items():
+                lead_phone = (lead.get("phone") or "").replace("+1", "").replace("+", "").replace("-", "").replace(" ", "").replace("(", "").replace(")", "")
+                if lead_phone and lead_phone == clean_phone:
+                    lead["call_count"] = lead.get("call_count", 0) + 1
+                    lead["call_session_ids"] = lead.get("call_session_ids", []) + [c["id"]]
+                    if not lead.get("source") or lead["source"] == "unknown":
+                        lead["source"] = "phone_call"
+                    elif lead["source"] != "phone_call":
+                        lead["source"] = "multi"
+                    matched = True
+                    break
+            if not matched:
+                key = phone
+                leads[key] = {
+                    "id": key,
+                    "name": c.get("caller_name") or "Caller",
+                    "email": None,
+                    "phone": phone,
+                    "first_contact": c.get("started_at") or "",
+                    "last_contact": c.get("started_at") or "",
+                    "message_count": 0,
+                    "source": "phone_call",
+                    "intents": [],
+                    "status": "new",
+                    "chat_session_ids": [],
+                    "call_count": 1,
+                    "call_session_ids": [c["id"]],
+                }
+    except Exception:
+        pass
+
     # ── 3. Also pull from inbound_messages for legacy form leads ─────
     try:
         msgs_res = db.table("inbound_messages").select(
@@ -192,6 +236,8 @@ async def get_lead_database(business_id: str):
     result = []
     for lead in leads.values():
         top = lead["intents"][0] if lead["intents"] else "chat"
+        lead.setdefault("call_count", 0)
+        lead.setdefault("call_session_ids", [])
         result.append({**lead, "top_intent": top})
 
     result.sort(key=lambda x: x["last_contact"], reverse=True)
@@ -249,6 +295,53 @@ async def get_lead_chats(lead_id: str):
         })
 
     return {"sessions": result}
+
+
+@router.get("/call-history")
+async def get_call_history_endpoint(
+    business_id: str,
+    period: str = "month",
+):
+    """Fetch past phone call sessions with transcripts for the dashboard."""
+    db = get_db()
+    from datetime import timedelta
+
+    now = datetime.now(timezone.utc)
+    if period == "today":
+        start = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+    elif period == "week":
+        start = (now - timedelta(days=7)).isoformat()
+    else:
+        start = (now - timedelta(days=30)).isoformat()
+
+    sessions_res = db.table("call_sessions").select("*").eq(
+        "business_id", business_id
+    ).gte("started_at", start).order("started_at", desc=True).execute()
+
+    result = []
+    for session in (sessions_res.data or []):
+        transcripts_res = db.table("call_transcripts").select(
+            "id, role, content, timestamp"
+        ).eq("session_id", session["id"]).order("timestamp", desc=False).execute()
+        transcripts = transcripts_res.data or []
+
+        caller_msgs = [t for t in transcripts if t["role"] == "caller"]
+        last_caller = caller_msgs[-1]["content"][:120] if caller_msgs else ""
+
+        result.append({
+            "id": session["id"],
+            "caller_phone": session.get("caller_phone") or "",
+            "caller_name": session.get("caller_name") or "Caller",
+            "started_at": session.get("started_at"),
+            "ended_at": session.get("ended_at"),
+            "duration_seconds": session.get("duration_seconds") or 0,
+            "status": session.get("status", "ended"),
+            "transcript_count": len(transcripts),
+            "last_caller_message": last_caller,
+            "transcripts": transcripts,
+        })
+
+    return {"calls": result, "total": len(result)}
 
 
 @router.get("/chat-history")

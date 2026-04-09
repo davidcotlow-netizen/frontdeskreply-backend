@@ -98,6 +98,18 @@ async def dashboard_summary(business_id: str, period: str = "today"):
 
     accuracy_rate = round((confident_responses / total_ai_responses) * 100) if total_ai_responses > 0 else 0
 
+    # ── Call metrics ────────────────────────────────────────────
+    calls_res = db.table("call_sessions").select(
+        "id, duration_seconds, status"
+    ).eq("business_id", business_id).gte("started_at", start).lte("started_at", end).execute()
+    calls = calls_res.data or []
+
+    total_calls = len(calls)
+    total_call_seconds = sum(c.get("duration_seconds") or 0 for c in calls)
+    total_call_minutes = round(total_call_seconds / 60, 1) if total_call_seconds > 0 else 0
+    avg_call_duration = round(total_call_seconds / total_calls) if total_calls > 0 else 0
+    active_calls = sum(1 for c in calls if c.get("status") == "active")
+
     return {
         "total_conversations": total_conversations,
         "total_messages": total_messages,
@@ -110,6 +122,10 @@ async def dashboard_summary(business_id: str, period: str = "today"):
         "leads_with_phone": leads_with_phone,
         "conversion_rate": conversion_rate,
         "accuracy_rate": accuracy_rate,
+        "total_calls": total_calls,
+        "total_call_minutes": total_call_minutes,
+        "avg_call_duration_seconds": avg_call_duration,
+        "active_calls": active_calls,
         "period": period,
     }
 
@@ -142,6 +158,34 @@ async def conversations_by_day(business_id: str, period: str = "week"):
     else:
         days = 30
 
+    result = []
+    for i in range(days - 1, -1, -1):
+        day = (now - timedelta(days=i)).strftime("%Y-%m-%d")
+        result.append({"date": day, "count": by_day.get(day, 0)})
+
+    return {"data": result}
+
+
+@router.get("/calls-by-day")
+async def calls_by_day(business_id: str, period: str = "week"):
+    """Phone calls grouped by day for charting."""
+    db = get_db()
+    start, end = _date_range(period)
+
+    calls_res = db.table("call_sessions").select(
+        "started_at"
+    ).eq("business_id", business_id).gte("started_at", start).lte("started_at", end).execute()
+
+    by_day: dict[str, int] = {}
+    for c in (calls_res.data or []):
+        try:
+            day = datetime.fromisoformat(c["started_at"].replace("Z", "+00:00")).strftime("%Y-%m-%d")
+            by_day[day] = by_day.get(day, 0) + 1
+        except Exception:
+            pass
+
+    now = datetime.now(timezone.utc)
+    days = 1 if period == "today" else 7 if period == "week" else 30
     result = []
     for i in range(days - 1, -1, -1):
         day = (now - timedelta(days=i)).strftime("%Y-%m-%d")
