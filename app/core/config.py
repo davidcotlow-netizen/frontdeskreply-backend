@@ -41,6 +41,11 @@ class Settings(BaseSettings):
     chat_session_timeout_minutes: int = 30
     chat_max_context_messages: int = 20
 
+    # Voice AI
+    twilio_voice_number: str = ""
+    voice_welcome_greeting: str = "Hi! I'm Milo. How can I help you today?"
+    voice_max_call_minutes: int = 10
+
     # App
     app_env: str = "development"
     frontend_url: str = "http://localhost:3000"

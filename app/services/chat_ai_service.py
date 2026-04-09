@@ -116,6 +116,7 @@ class ChatAIService:
         message_history: list,
         visitor_message: str,
         visitor_name: Optional[str] = None,
+        voice_mode: bool = False,
     ) -> AsyncGenerator[str, None]:
         """
         Stream Claude's response token by token.
@@ -131,6 +132,18 @@ class ChatAIService:
         system_prompt = self._build_system_prompt(business_config)
         if visitor_name:
             system_prompt += f"\n\nThe visitor's name is: {visitor_name}"
+
+        if voice_mode:
+            system_prompt += """
+
+IMPORTANT VOICE RULES (you are on a phone call, not typing in chat):
+1. Keep responses SHORT — under 30 words when possible.
+2. Speak naturally — use contractions, casual phrasing.
+3. Never use bullet points, markdown, links, or URLs.
+4. Say phone numbers slowly: "three four six... four one oh... six oh two two."
+5. End with a natural prompt like "Is there anything else I can help with?"
+6. If they want a real person, say "Of course! Let me transfer you now."
+"""
 
         messages = self._build_messages(message_history, visitor_message)
 
