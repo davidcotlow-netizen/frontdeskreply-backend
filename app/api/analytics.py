@@ -78,6 +78,9 @@ async def dashboard_summary(business_id: str, period: str = "today"):
     avg_response = round(sum(response_times) / len(response_times), 1) if response_times else None
     avg_chat_length = round(total_messages / total_conversations, 1) if total_conversations > 0 else 0
 
+    # Conversion rate: conversations that captured an email
+    conversion_rate = round((leads_with_email / total_conversations) * 100) if total_conversations > 0 else 0
+
     return {
         "total_conversations": total_conversations,
         "total_messages": total_messages,
@@ -88,6 +91,7 @@ async def dashboard_summary(business_id: str, period: str = "today"):
         "active_now": active_now,
         "leads_with_email": leads_with_email,
         "leads_with_phone": leads_with_phone,
+        "conversion_rate": conversion_rate,
         "period": period,
     }
 

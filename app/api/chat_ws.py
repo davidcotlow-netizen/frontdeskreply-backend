@@ -176,7 +176,7 @@ async def chat_websocket(websocket: WebSocket, business_id: str):
         await send_frame(websocket, {
             "type": "session_created",
             "session_id": session_id,
-            "agent_name": config.get("name", "Assistant"),
+            "agent_name": "Milo",
             "business_name": config.get("name", ""),
         })
 
@@ -185,12 +185,12 @@ async def chat_websocket(websocket: WebSocket, business_id: str):
             business_name = config.get("name", "us")
             greeting = (
                 f"Hi{' ' + visitor_name if visitor_name and visitor_name != 'Visitor' else ''}! "
-                f"Welcome to {business_name}. How can I help you today?"
+                f"I'm Milo, your assistant at {business_name}. How can I help you today?"
             )
             await send_frame(websocket, {
                 "type": "greeting",
                 "content": greeting,
-                "agent_name": config.get("name", "Assistant"),
+                "agent_name": "Milo",
             })
             add_chat_message(session_id=session_id, role="ai", content=greeting, confidence_score=1.0)
         else:

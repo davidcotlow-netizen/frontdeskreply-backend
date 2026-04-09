@@ -88,59 +88,167 @@ async def get_sent_messages(
 
 @router.get("/leads")
 async def get_lead_database(business_id: str):
-    """MUST be before /{conversation_id} to avoid route conflict."""
+    """
+    Unified lead database — merges contacts from both the old form pipeline
+    and the new live chat sessions. MUST be before /{conversation_id}.
+    """
     db = get_db()
-
-    try:
-        res = db.table("inbound_messages").select(
-            "sender_name, sender_email, sender_phone, intent, received_at"
-        ).eq("business_id", business_id).order("received_at", desc=False).execute()
-        messages = res.data or []
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
     leads: dict = {}
 
-    for m in messages:
-        email = (m.get("sender_email") or "").strip().lower() or None
-        phone = (m.get("sender_phone") or "").strip() or None
-        name = m.get("sender_name") or "Unknown"
-        intent = m.get("intent") or "unknown"
-        received = m.get("received_at") or ""
-
-        key = email or phone or name
-
-        if key not in leads:
+    # ── 1. Pull contacts from the contacts table (includes chat visitors) ─
+    try:
+        contacts_res = db.table("contacts").select(
+            "id, name, email, phone, source_channel, first_seen_at, last_seen_at"
+        ).eq("business_id", business_id).execute()
+        for c in (contacts_res.data or []):
+            email = (c.get("email") or "").strip().lower() or None
+            phone = (c.get("phone") or "").strip() or None
+            key = email or phone or c.get("name", "Unknown")
             leads[key] = {
-                "id": key,
-                "name": name,
+                "id": c["id"],
+                "name": c.get("name") or "Unknown",
                 "email": email,
                 "phone": phone,
-                "first_contact": received,
-                "last_contact": received,
+                "first_contact": c.get("first_seen_at") or "",
+                "last_contact": c.get("last_seen_at") or "",
                 "message_count": 0,
+                "source": c.get("source_channel") or "unknown",
                 "intents": [],
+                "status": "new",
+                "chat_session_ids": [],
             }
+    except Exception:
+        pass
 
-        lead = leads[key]
-        lead["message_count"] += 1
-        lead["last_contact"] = received
+    # ── 2. Enrich with chat session data ─────────────────────────────
+    try:
+        sessions_res = db.table("chat_sessions").select(
+            "id, visitor_name, visitor_email, started_at, metadata"
+        ).eq("business_id", business_id).execute()
+        for s in (sessions_res.data or []):
+            email = (s.get("visitor_email") or "").strip().lower() or None
+            metadata = s.get("metadata") or {}
+            phone = metadata.get("visitor_phone") or None
+            key = email or phone or s.get("visitor_name", "Unknown")
 
-        if name and name != "Unknown" and lead["name"] == "Unknown":
-            lead["name"] = name
-        if email and not lead["email"]:
-            lead["email"] = email
-        if phone and not lead["phone"]:
-            lead["phone"] = phone
-        if intent and intent not in lead["intents"]:
-            lead["intents"].append(intent)
+            if key in leads:
+                leads[key]["chat_session_ids"].append(s["id"])
+                if not leads[key].get("source") or leads[key]["source"] == "unknown":
+                    leads[key]["source"] = "live_chat"
+            else:
+                leads[key] = {
+                    "id": key,
+                    "name": s.get("visitor_name") or "Unknown",
+                    "email": email,
+                    "phone": phone,
+                    "first_contact": s.get("started_at") or "",
+                    "last_contact": s.get("started_at") or "",
+                    "message_count": 0,
+                    "source": "live_chat",
+                    "intents": [],
+                    "status": "new",
+                    "chat_session_ids": [s["id"]],
+                }
+
+            # Count messages in this session
+            msgs_res = db.table("chat_messages").select("id").eq(
+                "session_id", s["id"]
+            ).execute()
+            leads[key]["message_count"] += len(msgs_res.data or [])
+    except Exception:
+        pass
+
+    # ── 3. Also pull from inbound_messages for legacy form leads ─────
+    try:
+        msgs_res = db.table("inbound_messages").select(
+            "sender_name, sender_email, sender_phone, intent, received_at"
+        ).eq("business_id", business_id).order("received_at", desc=False).execute()
+        for m in (msgs_res.data or []):
+            email = (m.get("sender_email") or "").strip().lower() or None
+            phone = (m.get("sender_phone") or "").strip() or None
+            key = email or phone or m.get("sender_name", "Unknown")
+            intent = m.get("intent") or "unknown"
+
+            if key not in leads:
+                leads[key] = {
+                    "id": key,
+                    "name": m.get("sender_name") or "Unknown",
+                    "email": email, "phone": phone,
+                    "first_contact": m.get("received_at") or "",
+                    "last_contact": m.get("received_at") or "",
+                    "message_count": 0, "source": "web_form",
+                    "intents": [], "status": "new", "chat_session_ids": [],
+                }
+
+            lead = leads[key]
+            lead["message_count"] += 1
+            if m.get("received_at") and m["received_at"] > lead["last_contact"]:
+                lead["last_contact"] = m["received_at"]
+            if intent and intent not in lead["intents"]:
+                lead["intents"].append(intent)
+    except Exception:
+        pass
 
     result = []
     for lead in leads.values():
-        top = lead["intents"][0] if lead["intents"] else "unknown"
+        top = lead["intents"][0] if lead["intents"] else "chat"
         result.append({**lead, "top_intent": top})
 
     result.sort(key=lambda x: x["last_contact"], reverse=True)
     return {"leads": result, "total": len(result)}
+
+
+@router.patch("/leads/{lead_id}/status")
+async def update_lead_status(lead_id: str, body: dict):
+    """Update a lead's lifecycle status (new, contacted, quoted, converted)."""
+    db = get_db()
+    status = body.get("status", "new")
+    if status not in ("new", "contacted", "quoted", "converted"):
+        raise HTTPException(status_code=400, detail="Invalid status")
+
+    # Update in contacts table
+    try:
+        db.table("contacts").update({"source_channel": status}).eq("id", lead_id).execute()
+    except Exception:
+        pass
+    return {"status": status, "lead_id": lead_id}
+
+
+@router.get("/leads/{lead_id}/chats")
+async def get_lead_chats(lead_id: str):
+    """Get chat transcripts for a specific lead by matching email."""
+    db = get_db()
+
+    # Look up the contact
+    contact_res = db.table("contacts").select("email, phone").eq("id", lead_id).maybe_single().execute()
+    if not contact_res or not contact_res.data:
+        return {"sessions": []}
+
+    email = contact_res.data.get("email")
+    phone = contact_res.data.get("phone")
+
+    # Find chat sessions by email match
+    sessions = []
+    if email:
+        sess_res = db.table("chat_sessions").select("*").eq("visitor_email", email).order("started_at", desc=True).execute()
+        sessions = sess_res.data or []
+
+    # Get messages for each session
+    result = []
+    for s in sessions:
+        msgs_res = db.table("chat_messages").select(
+            "id, role, content, sent_at"
+        ).eq("session_id", s["id"]).order("sent_at", desc=False).execute()
+        result.append({
+            "id": s["id"],
+            "started_at": s.get("started_at"),
+            "ended_at": s.get("ended_at"),
+            "status": s.get("status"),
+            "message_count": len(msgs_res.data or []),
+            "messages": msgs_res.data or [],
+        })
+
+    return {"sessions": result}
 
 
 @router.get("/chat-history")
