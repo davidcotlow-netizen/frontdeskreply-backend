@@ -154,30 +154,46 @@ class ChatAIService:
         """
         Estimate confidence in the AI response.
         Uses heuristic hedging detection (fast, no extra API call).
+
+        Priority order:
+        1. Check if response uses FAQ content (high confidence)
+        2. Check for strong uncertainty phrases (low confidence)
+        3. Default moderate confidence
         """
-        hedging_phrases = [
-            "let me connect you",
-            "i'm not sure",
-            "i don't have that information",
-            "contact us directly",
-            "reach out to",
-            "great question! let me",
-            "i'd recommend calling",
-            "for the most accurate",
-        ]
         text_lower = response_text.lower()
-        for phrase in hedging_phrases:
+
+        # ── First: check if response references FAQ content (high confidence) ──
+        faq_answers = [f.get("answer", "").lower() for f in business_config.get("faqs", [])]
+        faq_match = False
+        for answer in faq_answers:
+            if len(answer) > 20:
+                # Check if multiple key words from the FAQ answer appear in the response
+                answer_words = [w for w in answer.split() if len(w) > 4][:8]
+                matches = sum(1 for w in answer_words if w in text_lower)
+                if matches >= 2:
+                    faq_match = True
+                    break
+
+        if faq_match:
+            return 0.92  # High confidence — answer grounded in FAQ
+
+        # ── Second: check for strong uncertainty / deflection phrases ──
+        # These indicate the AI genuinely doesn't know the answer
+        low_confidence_phrases = [
+            "let me connect you with",
+            "i'm not sure about that",
+            "i don't have that information",
+            "i don't have specific details",
+            "great question! let me connect",
+            "for the most accurate answer",
+            "i'd need to check on that",
+            "i'm unable to confirm",
+        ]
+        for phrase in low_confidence_phrases:
             if phrase in text_lower:
                 return 0.4  # Low confidence — AI punted to human
 
-        # Check if response references FAQ content (higher confidence)
-        faq_answers = [f.get("answer", "").lower() for f in business_config.get("faqs", [])]
-        for answer in faq_answers:
-            # If the response overlaps significantly with a FAQ answer
-            if len(answer) > 20 and any(word in text_lower for word in answer.split()[:5]):
-                return 0.92
-
-        return 0.75  # Default moderate confidence
+        return 0.80  # Default moderate-high confidence
 
     async def _mock_stream(
         self,
