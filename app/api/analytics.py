@@ -19,18 +19,19 @@ def _date_range(period: str):
     return start.isoformat(), now.isoformat()
 
 
-@router.get("/summary", response_model=DashboardSummary)
+@router.get("/summary")
 async def dashboard_summary(business_id: str, period: str = "today"):
     db = get_db()
     start, end = _date_range(period)
 
+    # ── Email/SMS pipeline metrics ───────────────────────────────
     msgs_res = db.table("inbound_messages").select(
         "id, status, intent, urgency_score, received_at, processed_at"
     ).eq("business_id", business_id).gte("received_at", start).lte("received_at", end).execute()
 
     messages = msgs_res.data or []
 
-    new_leads = len(messages)
+    form_leads = len(messages)
     auto_handled = sum(1 for m in messages if m.get("status") == "sent" and
                        _was_auto_sent(db, m["id"]))
     human_reviewed = sum(1 for m in messages if m.get("status") == "sent" and
@@ -49,17 +50,58 @@ async def dashboard_summary(business_id: str, period: str = "today"):
             except Exception:
                 pass
 
-    avg_response = sum(response_times) / len(response_times) if response_times else None
+    # ── Live chat metrics ────────────────────────────────────────
+    chat_sessions_res = db.table("chat_sessions").select(
+        "id, started_at, status"
+    ).eq("business_id", business_id).gte("started_at", start).lte("started_at", end).execute()
+    chat_sessions = chat_sessions_res.data or []
+    chat_count = len(chat_sessions)
 
-    return DashboardSummary(
-        new_leads=new_leads,
-        avg_first_response_seconds=avg_response,
-        auto_handled_count=auto_handled,
-        human_reviewed_count=human_reviewed,
-        urgent_count=urgent,
-        booking_requests_captured=booking_requests,
-        period=period,
-    )
+    # Count total chat messages and calculate avg chat response time
+    chat_message_count = 0
+    chat_response_times = []
+    for session in chat_sessions:
+        chat_msgs_res = db.table("chat_messages").select(
+            "role, sent_at"
+        ).eq("session_id", session["id"]).order("sent_at", desc=False).execute()
+        chat_msgs = chat_msgs_res.data or []
+        chat_message_count += len(chat_msgs)
+
+        # Calculate response times: time between visitor message and next AI message
+        for i in range(len(chat_msgs) - 1):
+            if chat_msgs[i]["role"] == "visitor" and chat_msgs[i + 1]["role"] == "ai":
+                try:
+                    v_time = datetime.fromisoformat(chat_msgs[i]["sent_at"].replace("Z", "+00:00"))
+                    a_time = datetime.fromisoformat(chat_msgs[i + 1]["sent_at"].replace("Z", "+00:00"))
+                    chat_response_times.append((a_time - v_time).total_seconds())
+                except Exception:
+                    pass
+
+    # ── Combined metrics ─────────────────────────────────────────
+    all_response_times = response_times + chat_response_times
+    avg_response = sum(all_response_times) / len(all_response_times) if all_response_times else None
+    total_leads = form_leads + chat_count
+
+    # Chat conversations are all auto-handled by AI
+    total_auto = auto_handled + chat_count
+
+    return {
+        "new_leads": total_leads,
+        "avg_first_response_seconds": avg_response,
+        "auto_handled_count": total_auto,
+        "human_reviewed_count": human_reviewed,
+        "urgent_count": urgent,
+        "booking_requests_captured": booking_requests,
+        "period": period,
+        # Chat-specific metrics
+        "chat_conversations": chat_count,
+        "chat_messages": chat_message_count,
+        "chat_avg_response_seconds": (
+            sum(chat_response_times) / len(chat_response_times)
+            if chat_response_times else None
+        ),
+        "form_leads": form_leads,
+    }
 
 
 @router.get("/intent-breakdown")
