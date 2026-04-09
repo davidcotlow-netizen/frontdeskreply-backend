@@ -149,10 +149,13 @@ IMPORTANT VOICE RULES (you are on a phone call, not typing in chat):
 
         messages = self._build_messages(message_history, visitor_message)
 
+        # Use Haiku for voice (3x faster) or default model for chat
+        model = "claude-haiku-4-5-20250414" if voice_mode else self.model
+
         try:
             async with self.client.messages.stream(
-                model=self.model,
-                max_tokens=250,
+                model=model,
+                max_tokens=150 if voice_mode else 250,
                 system=system_prompt,
                 messages=messages,
             ) as stream:
