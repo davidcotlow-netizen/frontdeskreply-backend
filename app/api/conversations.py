@@ -143,6 +143,69 @@ async def get_lead_database(business_id: str):
     return {"leads": result, "total": len(result)}
 
 
+@router.get("/chat-history")
+async def get_chat_history(
+    business_id: str,
+    period: str = "month",
+    status: str = "all",
+):
+    """Fetch past live chat conversations with visitor info and message counts."""
+    db = get_db()
+    from datetime import timedelta
+
+    now = datetime.now(timezone.utc)
+    if period == "today":
+        start = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+    elif period == "week":
+        start = (now - timedelta(days=7)).isoformat()
+    elif period == "month":
+        start = (now - timedelta(days=30)).isoformat()
+    else:
+        start = (now - timedelta(days=90)).isoformat()
+
+    query = db.table("chat_sessions").select("*").eq(
+        "business_id", business_id
+    ).gte("started_at", start).order("started_at", desc=True)
+
+    if status != "all":
+        query = query.eq("status", status)
+
+    sessions_res = query.execute()
+    sessions = sessions_res.data or []
+
+    result = []
+    for session in sessions:
+        # Fetch messages for this session
+        msgs_res = db.table("chat_messages").select(
+            "id, role, content, sent_at, confidence_score"
+        ).eq("session_id", session["id"]).order("sent_at", desc=False).execute()
+        messages = msgs_res.data or []
+
+        # Get visitor phone from metadata if stored there
+        metadata = session.get("metadata") or {}
+        visitor_phone = metadata.get("visitor_phone", "")
+
+        # Get last visitor message as preview
+        visitor_msgs = [m for m in messages if m["role"] == "visitor"]
+        last_visitor_msg = visitor_msgs[-1]["content"] if visitor_msgs else ""
+
+        result.append({
+            "id": session["id"],
+            "visitor_name": session.get("visitor_name") or "Visitor",
+            "visitor_email": session.get("visitor_email") or "",
+            "visitor_phone": visitor_phone,
+            "started_at": session.get("started_at"),
+            "ended_at": session.get("ended_at"),
+            "status": session.get("status", "active"),
+            "human_active": session.get("human_active", False),
+            "message_count": len(messages),
+            "last_message_preview": last_visitor_msg[:120] if last_visitor_msg else "",
+            "messages": messages,
+        })
+
+    return {"conversations": result, "total": len(result)}
+
+
 @router.get("/{conversation_id}")
 async def get_conversation(conversation_id: str):
     db = get_db()
