@@ -19,19 +19,93 @@ def create_chat_session(
     business_id: str,
     visitor_name: Optional[str] = None,
     visitor_email: Optional[str] = None,
+    visitor_phone: Optional[str] = None,
 ) -> dict:
-    """Create a new chat session. Returns the full row."""
+    """Create a new chat session and save visitor as a lead in contacts table."""
     db = get_db()
+
+    # Save visitor as a lead in the contacts table (same as form submissions)
+    contact_id = _find_or_create_contact(
+        db, business_id,
+        name=visitor_name,
+        email=visitor_email,
+        phone=visitor_phone,
+    )
+
     res = db.table("chat_sessions").insert({
         "business_id": business_id,
         "visitor_name": visitor_name,
         "visitor_email": visitor_email,
         "started_at": datetime.now(timezone.utc).isoformat(),
         "status": "active",
+        "metadata": {"contact_id": contact_id, "visitor_phone": visitor_phone},
     }).execute()
     session = res.data[0]
-    logger.info(f"Chat session created: {session['id']} for business {business_id}")
+    logger.info(f"Chat session created: {session['id']} for business {business_id}, contact {contact_id}")
     return session
+
+
+def _find_or_create_contact(
+    db,
+    business_id: str,
+    name: Optional[str] = None,
+    email: Optional[str] = None,
+    phone: Optional[str] = None,
+) -> Optional[str]:
+    """
+    Find existing contact by email or phone, or create a new one.
+    Same pattern as webhooks.py — feeds the Lead Database.
+    Returns contact_id.
+    """
+    # Try email first
+    if email:
+        try:
+            res = db.table("contacts").select("id").eq(
+                "business_id", business_id
+            ).eq("email", email).maybe_single().execute()
+            if res and res.data:
+                updates = {"last_seen_at": datetime.now(timezone.utc).isoformat()}
+                if phone:
+                    updates["phone"] = phone
+                if name:
+                    updates["name"] = name
+                db.table("contacts").update(updates).eq("id", res.data["id"]).execute()
+                return res.data["id"]
+        except Exception:
+            pass
+
+    # Try phone
+    if phone:
+        try:
+            res = db.table("contacts").select("id").eq(
+                "business_id", business_id
+            ).eq("phone", phone).maybe_single().execute()
+            if res and res.data:
+                updates = {"last_seen_at": datetime.now(timezone.utc).isoformat()}
+                if email:
+                    updates["email"] = email
+                if name:
+                    updates["name"] = name
+                db.table("contacts").update(updates).eq("id", res.data["id"]).execute()
+                return res.data["id"]
+        except Exception:
+            pass
+
+    # Create new contact
+    try:
+        new_contact = db.table("contacts").insert({
+            "business_id": business_id,
+            "name": name or "Chat Visitor",
+            "email": email,
+            "phone": phone,
+            "source_channel": "live_chat",
+            "first_seen_at": datetime.now(timezone.utc).isoformat(),
+            "last_seen_at": datetime.now(timezone.utc).isoformat(),
+        }).execute()
+        return new_contact.data[0]["id"]
+    except Exception as e:
+        logger.error(f"Failed to create contact for chat visitor: {e}")
+        return None
 
 
 def get_chat_session(session_id: str) -> Optional[dict]:

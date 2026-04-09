@@ -17,6 +17,7 @@ class InboundChatFrame(BaseModel):
     content: Optional[str] = None
     visitor_name: Optional[str] = None
     visitor_email: Optional[str] = None
+    visitor_phone: Optional[str] = None
     session_id: Optional[str] = None  # for reconnecting to existing session
 
 

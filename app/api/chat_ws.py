@@ -148,6 +148,7 @@ async def chat_websocket(websocket: WebSocket, business_id: str):
         existing_session_id = init_data.get("session_id")
         visitor_name = init_data.get("visitor_name", "Visitor")
         visitor_email = init_data.get("visitor_email")
+        visitor_phone = init_data.get("visitor_phone")
 
         if existing_session_id:
             # Reconnect to existing session
@@ -165,6 +166,7 @@ async def chat_websocket(websocket: WebSocket, business_id: str):
                 business_id=business_id,
                 visitor_name=visitor_name,
                 visitor_email=visitor_email,
+                visitor_phone=visitor_phone,
             )
             session_id = session["id"]
 
@@ -239,28 +241,6 @@ async def chat_websocket(websocket: WebSocket, business_id: str):
                 if msg_type == "pong":
                     continue
 
-                # ── Escalation request ───────────────────────────────
-                if msg_type == "escalate_request":
-                    set_session_escalated(session_id)
-                    await send_frame(websocket, {
-                        "type": "system",
-                        "content": "I'm connecting you with our team now. Someone will be with you shortly!",
-                    })
-                    add_chat_message(
-                        session_id=session_id, role="ai",
-                        content="I'm connecting you with our team now. Someone will be with you shortly!",
-                    )
-                    # Notify business owner
-                    owner_phone = config.get("owner_phone")
-                    if owner_phone:
-                        send_chat_escalation(
-                            owner_phone=owner_phone,
-                            business_name=config.get("name", ""),
-                            visitor_name=visitor_name,
-                            reason="Visitor requested to speak with a person",
-                        )
-                    continue
-
                 # ── Visitor message ──────────────────────────────────
                 if msg_type != "message":
                     continue
@@ -329,22 +309,6 @@ async def chat_websocket(websocket: WebSocket, business_id: str):
                 )
 
                 ai_exchange_count += 1
-
-                # Auto-escalate if confidence is low
-                from app.core.config import get_settings
-                settings = get_settings()
-                chat_threshold = getattr(settings, 'chat_confidence_threshold', 0.7)
-
-                if confidence < chat_threshold:
-                    set_session_escalated(session_id)
-                    owner_phone = config.get("owner_phone")
-                    if owner_phone:
-                        send_chat_escalation(
-                            owner_phone=owner_phone,
-                            business_name=config.get("name", ""),
-                            visitor_name=visitor_name,
-                            reason=f"Low AI confidence ({confidence:.0%}) on visitor question",
-                        )
 
         finally:
             ping_task.cancel()
