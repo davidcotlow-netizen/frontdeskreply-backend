@@ -314,6 +314,41 @@ async def get_chat_history(
     return {"conversations": result, "total": len(result)}
 
 
+@router.post("/leads/send-email")
+async def send_bulk_email(body: dict):
+    """Send an email to selected leads from the dashboard."""
+    from app.services.email_service import send_email
+
+    emails = body.get("emails", [])
+    subject = body.get("subject", "")
+    message = body.get("message", "")
+    business_id = body.get("business_id", "")
+
+    if not emails or not subject or not message:
+        raise HTTPException(status_code=400, detail="emails, subject, and message are required")
+
+    results = []
+    for email in emails:
+        if not email or "@" not in email:
+            continue
+        result = send_email(
+            to_email=email,
+            body=message,
+            subject=subject,
+            customer_name="",
+            business_id=business_id,
+        )
+        results.append({"email": email, **result})
+
+    sent_count = sum(1 for r in results if r.get("status") == "sent")
+    return {
+        "sent": sent_count,
+        "failed": len(results) - sent_count,
+        "total": len(results),
+        "results": results,
+    }
+
+
 @router.get("/{conversation_id}")
 async def get_conversation(conversation_id: str):
     db = get_db()
