@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 from datetime import datetime, timezone, timedelta
+from collections import Counter
 from app.core.database import get_db
-from app.models.schemas import DashboardSummary
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
@@ -21,238 +21,197 @@ def _date_range(period: str):
 
 @router.get("/summary")
 async def dashboard_summary(business_id: str, period: str = "today"):
+    """Chatbot-focused analytics summary."""
     db = get_db()
     start, end = _date_range(period)
 
-    # ── Email/SMS pipeline metrics ───────────────────────────────
-    msgs_res = db.table("inbound_messages").select(
-        "id, status, intent, urgency_score, received_at, processed_at"
-    ).eq("business_id", business_id).gte("received_at", start).lte("received_at", end).execute()
-
-    messages = msgs_res.data or []
-
-    form_leads = len(messages)
-    auto_handled = sum(1 for m in messages if m.get("status") == "sent" and
-                       _was_auto_sent(db, m["id"]))
-    human_reviewed = sum(1 for m in messages if m.get("status") == "sent" and
-                         not _was_auto_sent(db, m["id"]))
-    urgent = sum(1 for m in messages if (m.get("urgency_score") or 0) >= 4 and
-                 m.get("status") not in ("sent", "dismissed"))
-    booking_requests = sum(1 for m in messages if m.get("intent") == "booking_request")
-
-    response_times = []
-    for m in messages:
-        if m.get("received_at") and m.get("processed_at"):
-            try:
-                r = datetime.fromisoformat(m["received_at"].replace("Z", "+00:00"))
-                p = datetime.fromisoformat(m["processed_at"].replace("Z", "+00:00"))
-                response_times.append((p - r).total_seconds())
-            except Exception:
-                pass
-
-    # ── Live chat metrics ────────────────────────────────────────
-    chat_sessions_res = db.table("chat_sessions").select(
-        "id, started_at, status"
+    # ── Chat sessions ────────────────────────────────────────────
+    sessions_res = db.table("chat_sessions").select(
+        "id, started_at, ended_at, status, visitor_name, visitor_email, metadata"
     ).eq("business_id", business_id).gte("started_at", start).lte("started_at", end).execute()
-    chat_sessions = chat_sessions_res.data or []
-    chat_count = len(chat_sessions)
+    sessions = sessions_res.data or []
 
-    # Count total chat messages and calculate avg chat response time
-    chat_message_count = 0
-    chat_response_times = []
-    for session in chat_sessions:
-        chat_msgs_res = db.table("chat_messages").select(
-            "role, sent_at"
+    total_conversations = len(sessions)
+    active_now = sum(1 for s in sessions if s.get("status") == "active")
+
+    # Count leads with email or phone captured
+    leads_with_email = 0
+    leads_with_phone = 0
+    for s in sessions:
+        if s.get("visitor_email"):
+            leads_with_email += 1
+        metadata = s.get("metadata") or {}
+        if metadata.get("visitor_phone"):
+            leads_with_phone += 1
+
+    # ── Chat messages ────────────────────────────────────────────
+    total_messages = 0
+    visitor_messages = 0
+    ai_messages = 0
+    response_times = []
+    all_visitor_texts = []
+
+    for session in sessions:
+        msgs_res = db.table("chat_messages").select(
+            "role, content, sent_at"
         ).eq("session_id", session["id"]).order("sent_at", desc=False).execute()
-        chat_msgs = chat_msgs_res.data or []
-        chat_message_count += len(chat_msgs)
+        msgs = msgs_res.data or []
+        total_messages += len(msgs)
 
-        # Calculate response times: time between visitor message and next AI message
-        for i in range(len(chat_msgs) - 1):
-            if chat_msgs[i]["role"] == "visitor" and chat_msgs[i + 1]["role"] == "ai":
+        for msg in msgs:
+            if msg["role"] == "visitor":
+                visitor_messages += 1
+                all_visitor_texts.append(msg["content"])
+            elif msg["role"] == "ai":
+                ai_messages += 1
+
+        # Calculate response times (visitor msg → next AI msg)
+        for i in range(len(msgs) - 1):
+            if msgs[i]["role"] == "visitor" and msgs[i + 1]["role"] == "ai":
                 try:
-                    v_time = datetime.fromisoformat(chat_msgs[i]["sent_at"].replace("Z", "+00:00"))
-                    a_time = datetime.fromisoformat(chat_msgs[i + 1]["sent_at"].replace("Z", "+00:00"))
-                    chat_response_times.append((a_time - v_time).total_seconds())
+                    v = datetime.fromisoformat(msgs[i]["sent_at"].replace("Z", "+00:00"))
+                    a = datetime.fromisoformat(msgs[i + 1]["sent_at"].replace("Z", "+00:00"))
+                    response_times.append((a - v).total_seconds())
                 except Exception:
                     pass
 
-    # ── Combined metrics ─────────────────────────────────────────
-    all_response_times = response_times + chat_response_times
-    avg_response = sum(all_response_times) / len(all_response_times) if all_response_times else None
-    total_leads = form_leads + chat_count
-
-    # Chat conversations are all auto-handled by AI
-    total_auto = auto_handled + chat_count
+    avg_response = round(sum(response_times) / len(response_times), 1) if response_times else None
+    avg_chat_length = round(total_messages / total_conversations, 1) if total_conversations > 0 else 0
 
     return {
-        "new_leads": total_leads,
-        "avg_first_response_seconds": avg_response,
-        "auto_handled_count": total_auto,
-        "human_reviewed_count": human_reviewed,
-        "urgent_count": urgent,
-        "booking_requests_captured": booking_requests,
+        "total_conversations": total_conversations,
+        "total_messages": total_messages,
+        "visitor_messages": visitor_messages,
+        "ai_messages": ai_messages,
+        "avg_response_seconds": avg_response,
+        "avg_chat_length": avg_chat_length,
+        "active_now": active_now,
+        "leads_with_email": leads_with_email,
+        "leads_with_phone": leads_with_phone,
         "period": period,
-        # Chat-specific metrics
-        "chat_conversations": chat_count,
-        "chat_messages": chat_message_count,
-        "chat_avg_response_seconds": (
-            sum(chat_response_times) / len(chat_response_times)
-            if chat_response_times else None
-        ),
-        "form_leads": form_leads,
     }
 
 
-@router.get("/intent-breakdown")
-async def intent_breakdown(business_id: str, period: str = "today"):
+@router.get("/conversations-by-day")
+async def conversations_by_day(business_id: str, period: str = "week"):
+    """Chat conversations grouped by day for charting."""
     db = get_db()
     start, end = _date_range(period)
-    res = db.table("inbound_messages").select("intent").eq(
-        "business_id", business_id
-    ).gte("received_at", start).lte("received_at", end).execute()
 
-    counts = {}
-    for m in (res.data or []):
-        i = m.get("intent") or "unknown"
-        counts[i] = counts.get(i, 0) + 1
+    sessions_res = db.table("chat_sessions").select(
+        "started_at"
+    ).eq("business_id", business_id).gte("started_at", start).lte("started_at", end).execute()
 
-    return {"data": [{"intent": k, "count": v} for k, v in sorted(counts.items(), key=lambda x: -x[1])]}
-
-
-@router.get("/response-time")
-async def response_time_trend(business_id: str):
-    """Hourly avg response time for past 7 days."""
-    db = get_db()
-    start = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
-    res = db.table("inbound_messages").select(
-        "received_at, processed_at"
-    ).eq("business_id", business_id).gte("received_at", start).not_.is_(
-        "processed_at", "null"
-    ).execute()
-
-    hourly = {}
-    for m in (res.data or []):
+    # Group by date
+    by_day: dict[str, int] = {}
+    for s in (sessions_res.data or []):
         try:
-            r = datetime.fromisoformat(m["received_at"].replace("Z", "+00:00"))
-            p = datetime.fromisoformat(m["processed_at"].replace("Z", "+00:00"))
-            hour_key = r.strftime("%Y-%m-%dT%H:00")
-            diff = (p - r).total_seconds()
-            if hour_key not in hourly:
-                hourly[hour_key] = []
-            hourly[hour_key].append(diff)
+            day = datetime.fromisoformat(s["started_at"].replace("Z", "+00:00")).strftime("%Y-%m-%d")
+            by_day[day] = by_day.get(day, 0) + 1
         except Exception:
             pass
 
-    return {"data": [
-        {"hour": h, "avg_seconds": round(sum(v) / len(v), 1)}
-        for h, v in sorted(hourly.items())
-    ]}
+    # Fill in missing days
+    now = datetime.now(timezone.utc)
+    if period == "today":
+        days = 1
+    elif period == "week":
+        days = 7
+    else:
+        days = 30
+
+    result = []
+    for i in range(days - 1, -1, -1):
+        day = (now - timedelta(days=i)).strftime("%Y-%m-%d")
+        result.append({"date": day, "count": by_day.get(day, 0)})
+
+    return {"data": result}
 
 
-def _was_auto_sent(db, message_id: str) -> bool:
-    try:
-        res = db.table("sent_responses").select("auto_sent").eq(
-            "message_id", message_id
-        ).maybe_single().execute()
-        return bool(res.data and res.data.get("auto_sent"))
-    except Exception:
-        return False
-
-# Common English stop words to filter out of keyword extraction
-_STOP_WORDS = {
-    "a","an","the","and","or","but","in","on","at","to","for","of","with",
-    "my","i","we","you","your","our","me","us","it","its","is","are","was",
-    "were","be","been","being","have","has","had","do","does","did","will",
-    "would","could","should","may","might","can","this","that","these","those",
-    "they","them","their","there","here","when","where","what","how","who",
-    "which","just","also","so","up","out","if","about","get","got","need",
-    "want","like","know","help","please","hi","hello","hey","thanks","thank",
-    "not","no","yes","re","ve","ll","am","as","by","from","any","some","more",
-    "than","then","now","after","before","since","back","still","come","came",
-    "call","let","make","look","see","go","going","time","day","work","home",
-    "house","last","new","one","two","three","first","much","many","few","well",
-    "really","very","quite","soon","today","tomorrow","week","month","year",
-    "morning","afternoon","evening","night","service","services","company",
-    "business","someone","something","anything","everything","nothing","think",
-}
-
-def _extract_keywords(texts: list[str], top_n: int = 12) -> list[dict]:
-    """
-    Extract top N meaningful keywords/bigrams from a list of message texts.
-    Returns list of {phrase, count} sorted by frequency descending.
-    """
-    import re
-    from collections import Counter
-
-    unigrams: Counter = Counter()
-    bigrams: Counter = Counter()
-
-    for text in texts:
-        # Lowercase, strip punctuation
-        clean = re.sub(r"[^\w\s]", " ", text.lower())
-        words = [w for w in clean.split() if w not in _STOP_WORDS and len(w) > 2]
-
-        unigrams.update(words)
-        # Build meaningful bigrams
-        for i in range(len(words) - 1):
-            bigram = f"{words[i]} {words[i+1]}"
-            bigrams[bigram] += 1
-
-    # Prefer bigrams that appear 2+ times (more specific/meaningful)
-    candidates: Counter = Counter()
-    for phrase, count in bigrams.items():
-        if count >= 2:
-            candidates[phrase] = count
-
-    # Fill remaining slots with top unigrams not already covered by a bigram
-    covered_words = set()
-    for phrase in candidates:
-        covered_words.update(phrase.split())
-
-    for word, count in unigrams.most_common(30):
-        if word not in covered_words and count >= 1:
-            candidates[word] = count
-
-    return [
-        {"phrase": phrase, "count": count}
-        for phrase, count in candidates.most_common(top_n)
-    ]
-
-
-@router.get("/top-keywords")
-async def top_keywords(business_id: str, period: str = "month"):
-    """
-    Returns top keywords/phrases per intent group for the given period.
-    Used to power the 'What Customers Are Asking' section on the analytics page.
-    """
+@router.get("/top-questions")
+async def top_questions(business_id: str, period: str = "month"):
+    """Top visitor questions/messages from chat conversations."""
     db = get_db()
     start, end = _date_range(period)
 
-    res = db.table("inbound_messages").select(
-        "intent, body"
-    ).eq("business_id", business_id).gte(
-        "received_at", start
-    ).lte("received_at", end).not_.is_("intent", "null").execute()
+    sessions_res = db.table("chat_sessions").select("id").eq(
+        "business_id", business_id
+    ).gte("started_at", start).lte("started_at", end).execute()
 
-    messages = res.data or []
+    session_ids = [s["id"] for s in (sessions_res.data or [])]
+    if not session_ids:
+        return {"questions": [], "total": 0}
 
-    # Group message bodies by intent
-    intent_texts: dict[str, list[str]] = {}
-    for m in messages:
-        intent = m.get("intent") or "unknown"
-        body = m.get("body") or ""
-        if body:
-            intent_texts.setdefault(intent, []).append(body)
+    # Get all visitor messages
+    visitor_texts = []
+    for sid in session_ids:
+        msgs_res = db.table("chat_messages").select("content").eq(
+            "session_id", sid
+        ).eq("role", "visitor").execute()
+        for m in (msgs_res.data or []):
+            text = (m.get("content") or "").strip()
+            if text and len(text) > 5:  # Skip very short messages like "hi"
+                visitor_texts.append(text)
 
-    # Extract keywords per intent, sorted by message volume
+    # Simple frequency — group similar short messages, show unique longer ones
+    # For now, return the most common messages
+    counter = Counter()
+    for text in visitor_texts:
+        # Normalize: lowercase, strip punctuation for grouping
+        normalized = text.lower().strip("?!., ")
+        counter[normalized] += 1
+
+    # Map back to original casing (use first occurrence)
+    original_map = {}
+    for text in visitor_texts:
+        normalized = text.lower().strip("?!., ")
+        if normalized not in original_map:
+            original_map[normalized] = text
+
+    questions = [
+        {"question": original_map.get(q, q), "count": c}
+        for q, c in counter.most_common(15)
+    ]
+
+    return {"questions": questions, "total": len(visitor_texts)}
+
+
+@router.get("/response-time-trend")
+async def response_time_trend(business_id: str, period: str = "week"):
+    """Average AI response time by day."""
+    db = get_db()
+    start, end = _date_range(period)
+
+    sessions_res = db.table("chat_sessions").select("id, started_at").eq(
+        "business_id", business_id
+    ).gte("started_at", start).lte("started_at", end).execute()
+
+    daily_times: dict[str, list] = {}
+
+    for session in (sessions_res.data or []):
+        msgs_res = db.table("chat_messages").select(
+            "role, sent_at"
+        ).eq("session_id", session["id"]).order("sent_at", desc=False).execute()
+        msgs = msgs_res.data or []
+
+        for i in range(len(msgs) - 1):
+            if msgs[i]["role"] == "visitor" and msgs[i + 1]["role"] == "ai":
+                try:
+                    v = datetime.fromisoformat(msgs[i]["sent_at"].replace("Z", "+00:00"))
+                    a = datetime.fromisoformat(msgs[i + 1]["sent_at"].replace("Z", "+00:00"))
+                    day = v.strftime("%Y-%m-%d")
+                    daily_times.setdefault(day, []).append((a - v).total_seconds())
+                except Exception:
+                    pass
+
+    # Fill missing days
+    now = datetime.now(timezone.utc)
+    days = 7 if period == "week" else 30 if period == "month" else 1
     result = []
-    for intent, texts in sorted(intent_texts.items(), key=lambda x: -len(x[1])):
-        keywords = _extract_keywords(texts, top_n=12)
-        result.append({
-            "intent": intent,
-            "message_count": len(texts),
-            "keywords": keywords,
-        })
+    for i in range(days - 1, -1, -1):
+        day = (now - timedelta(days=i)).strftime("%Y-%m-%d")
+        times = daily_times.get(day, [])
+        avg = round(sum(times) / len(times), 1) if times else None
+        result.append({"date": day, "avg_seconds": avg, "count": len(times)})
 
-    return {"data": result, "total_messages": len(messages)}
+    return {"data": result}
