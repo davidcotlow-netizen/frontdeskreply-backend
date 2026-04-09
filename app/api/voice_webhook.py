@@ -70,18 +70,13 @@ async def inbound_call(request: Request):
 
     # Return TwiML with ConversationRelay — streams text bidirectionally
     # Twilio handles STT + TTS, we just send/receive text via WebSocket
+    # Build action URL for when Connect ends
+    action_url = f"https://{request.headers.get('host', 'api.frontdeskreply.com')}/api/v1/voice/status"
+
     twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Connect>
-        <ConversationRelay
-            url="{ws_url}"
-            ttsProvider="ElevenLabs"
-            transcriptionProvider="Deepgram"
-            language="en-US"
-            welcomeGreeting="{escape_xml(greeting)}"
-            interruptible="true"
-            dtmfDetection="true"
-        />
+    <Connect action="{action_url}">
+        <ConversationRelay url="{ws_url}" welcomeGreeting="{escape_xml(greeting)}" ttsProvider="ElevenLabs" transcriptionProvider="Deepgram" language="en-US" interruptible="true" dtmfDetection="true" />
     </Connect>
 </Response>"""
 
