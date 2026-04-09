@@ -165,8 +165,11 @@ async def respond_to_speech(request: Request):
         phone = config.get("phone", "") if config else ""
         full_response = f"I'm sorry, I'm having trouble right now. Please call us at {phone} for help."
 
-    # Clean up response for speech
+    # Clean up response for speech — strip markdown and emojis
+    import re
     full_response = full_response.replace("**", "").replace("*", "").replace("#", "").replace("_", "")
+    # Remove all emojis and unicode symbols
+    full_response = re.sub(r'[\U00010000-\U0010ffff\u2600-\u27BF\u2B50\u2764\u2705\u274C\u26A0\u2728\u2615\u270B\u270C\u261D\u2934\u2935\u25AA\u25AB\u25B6\u25C0\u25FB-\u25FE\u2600-\u26FF\u2702-\u27B0\u2934-\u2935\u3030\u303D\u3297\u3299\uFE0F\u200D]', '', full_response)
     full_response = full_response.strip()
 
     logger.info(f"Milo says: '{full_response[:100]}' session={session_id}")
