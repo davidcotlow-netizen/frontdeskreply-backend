@@ -121,6 +121,77 @@ async def update_auto_respond(business_id: str, body: AutoRespondUpdate):
         "auto_respond_enabled": body.auto_respond_enabled
     }).eq("id", business_id).execute()
     return {
-        "status": "updated",
+        "status": "updated_auto",
         "auto_respond_enabled": body.auto_respond_enabled
+    }
+
+
+# ── Widget Branding (Pro only) ───────────────────────────────────────────────
+
+class WidgetBrandingUpdate(BaseModel):
+    chatbot_name: Optional[str] = None
+    greeting_message: Optional[str] = None
+    brand_color: Optional[str] = None
+    show_powered_by: Optional[bool] = None
+
+
+@router.get("/widget-branding")
+async def get_widget_branding(business_id: str):
+    db = get_db()
+    biz = db.table("businesses").select("metadata").eq("id", business_id).maybe_single().execute()
+    if not biz or not biz.data:
+        raise HTTPException(status_code=404, detail="Business not found")
+
+    meta = biz.data.get("metadata") or {}
+    return {
+        "chatbot_name": meta.get("chatbot_name", "Vela"),
+        "greeting_message": meta.get("greeting_message", ""),
+        "brand_color": meta.get("brand_color", "#E8714A"),
+        "show_powered_by": meta.get("show_powered_by", True),
+    }
+
+
+@router.patch("/widget-branding")
+async def update_widget_branding(business_id: str, body: WidgetBrandingUpdate):
+    db = get_db()
+
+    # Check Pro plan
+    plan_res = db.table("subscription_plans").select("plan_tier").eq(
+        "business_id", business_id
+    ).eq("status", "active").maybe_single().execute()
+    if not plan_res or not plan_res.data or plan_res.data.get("plan_tier") != "pro":
+        raise HTTPException(status_code=403, detail="Widget branding customization requires Pro plan")
+
+    # Get current metadata
+    biz = db.table("businesses").select("metadata").eq("id", business_id).maybe_single().execute()
+    meta = (biz.data.get("metadata") or {}) if biz and biz.data else {}
+
+    updates = {k: v for k, v in body.dict().items() if v is not None}
+    meta.update(updates)
+
+    db.table("businesses").update({"metadata": meta}).eq("id", business_id).execute()
+
+    return {"status": "updated", **meta}
+
+
+@router.get("/widget-config")
+async def get_widget_config(business_id: str):
+    """Public endpoint — widget.js calls this to get branding settings."""
+    db = get_db()
+    biz = db.table("businesses").select("name, metadata").eq("id", business_id).maybe_single().execute()
+    if not biz or not biz.data:
+        return {"chatbot_name": "Vela", "brand_color": "#E8714A", "show_powered_by": True, "business_name": ""}
+
+    meta = biz.data.get("metadata") or {}
+    plan_res = db.table("subscription_plans").select("plan_tier").eq(
+        "business_id", business_id
+    ).eq("status", "active").maybe_single().execute()
+    is_pro = plan_res and plan_res.data and plan_res.data.get("plan_tier") == "pro"
+
+    return {
+        "chatbot_name": meta.get("chatbot_name", "Vela"),
+        "greeting_message": meta.get("greeting_message", ""),
+        "brand_color": meta.get("brand_color", "#E8714A"),
+        "show_powered_by": False if (is_pro and meta.get("show_powered_by") == False) else True,
+        "business_name": biz.data.get("name", ""),
     }
