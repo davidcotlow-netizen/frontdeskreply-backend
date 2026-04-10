@@ -62,8 +62,28 @@ async def list_all_clients(admin_key: str = ""):
         ).eq("channel_type", "voice").maybe_single().execute()
         voice_number = voice_res.data.get("external_identifier", "") if voice_res and voice_res.data else ""
 
-        # Get owner email from Clerk metadata or business record
+        # Get owner email from business record
         owner_email = biz.get("email") or ""
+
+        # Get FAQ count
+        faq_res = db.table("faqs").select("id").eq("business_id", biz_id).eq("active", True).execute()
+        faq_count = len(faq_res.data or [])
+
+        # Get last active date (most recent chat or call)
+        last_active = None
+        last_chat = db.table("chat_sessions").select("started_at").eq(
+            "business_id", biz_id
+        ).order("started_at", desc=True).limit(1).execute()
+        if last_chat.data:
+            last_active = last_chat.data[0]["started_at"]
+
+        last_call = db.table("call_sessions").select("started_at").eq(
+            "business_id", biz_id
+        ).order("started_at", desc=True).limit(1).execute()
+        if last_call.data:
+            call_ts = last_call.data[0]["started_at"]
+            if not last_active or call_ts > last_active:
+                last_active = call_ts
 
         clients.append({
             "id": biz_id,
@@ -78,6 +98,9 @@ async def list_all_clients(admin_key: str = ""):
             "call_minutes_used": call_minutes,
             "call_minutes_limit": 200 if (plan and plan.get("plan_tier") == "pro") else 0,
             "voice_number": voice_number,
+            "faq_count": faq_count,
+            "last_active": last_active,
+            "created_at": biz.get("created_at", ""),
         })
 
     # Sort by name
