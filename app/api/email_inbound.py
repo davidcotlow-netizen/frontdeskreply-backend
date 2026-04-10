@@ -70,13 +70,18 @@ async def receive_email(request: Request):
     if not body or not sender_email:
         return {"status": "skipped", "reason": "empty_email"}
 
+    # Check plan — email auto-reply requires Growth or above
+    db = get_db()
+    plan_res = db.table("subscription_plans").select("plan_tier").eq(
+        "business_id", business_id
+    ).eq("status", "active").maybe_single().execute()
+    if not plan_res or not plan_res.data or plan_res.data.get("plan_tier") not in ("growth", "pro", "enterprise"):
+        return {"status": "skipped", "reason": "plan_not_eligible"}
+
     # Load business config
     config = get_business_chat_config(business_id)
     if not config:
         return {"status": "skipped", "reason": "business_not_found"}
-
-    # Save sender as lead
-    db = get_db()
     contact_name = sender_name or sender_email.split("@")[0]
     _find_or_create_contact(db, business_id, email=sender_email, name=contact_name)
 
