@@ -85,6 +85,26 @@ async def list_all_clients(admin_key: str = ""):
             if not last_active or call_ts > last_active:
                 last_active = call_ts
 
+        # Get Stripe billing info if available
+        billing_renewal = None
+        stripe_status = "no_subscription"
+        try:
+            import stripe
+            from app.core.config import get_settings
+            s = get_settings()
+            if s.stripe_secret_key:
+                stripe.api_key = s.stripe_secret_key
+                # Look for active subscription by metadata or customer search
+                subs = stripe.Subscription.list(limit=10)
+                for sub in subs.data:
+                    meta = sub.get("metadata", {})
+                    if meta.get("business_id") == biz_id:
+                        billing_renewal = sub.current_period_end
+                        stripe_status = sub.status
+                        break
+        except Exception:
+            pass
+
         clients.append({
             "id": biz_id,
             "name": biz.get("name", "Unknown"),
@@ -101,6 +121,8 @@ async def list_all_clients(admin_key: str = ""):
             "faq_count": faq_count,
             "last_active": last_active,
             "created_at": biz.get("created_at", ""),
+            "billing_renewal": billing_renewal,
+            "stripe_status": stripe_status,
         })
 
     # Sort by name
