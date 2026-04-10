@@ -45,6 +45,8 @@ class Settings(BaseSettings):
     twilio_voice_number: str = ""
     voice_welcome_greeting: str = "Hi! I'm Milo. How can I help you today?"
     voice_max_call_minutes: int = 10
+    retell_api_key: str = "key_2b33b7e079f15e3c8351b40ad0ea"
+    twilio_sip_trunk_sid: str = "TK2047892d4b39a8cdd5ffca1a17b8cab1"
 
     # App
     app_env: str = "development"
