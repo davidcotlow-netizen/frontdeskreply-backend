@@ -3,10 +3,14 @@ Settings Endpoints — Frontdesk AI
 Lets business owners manage their profile, hours, FAQs, and emergency contact.
 """
 
+import logging
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List
 from app.core.database import get_db
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
@@ -33,6 +37,56 @@ class FAQItem(BaseModel):
 
 class FAQUpdate(BaseModel):
     faqs: List[FAQItem]
+
+
+# ── Retell Voice AI sync ─────────────────────────────────────────────────────
+
+def _sync_retell_prompt(business_id: str) -> None:
+    """
+    Rebuild the voice prompt from current FAQs + business config and push
+    it to the Retell LLM so the phone AI always has the latest knowledge.
+    Silently skips if the business has no Retell LLM provisioned.
+    """
+    try:
+        import httpx
+        from app.core.config import get_settings
+        from app.services.chat_service import get_business_chat_config
+        from app.api.voice_provision import build_voice_prompt
+
+        settings = get_settings()
+        if not settings.retell_api_key:
+            return
+
+        db = get_db()
+        biz = db.table("businesses").select("metadata").eq("id", business_id).maybe_single().execute()
+        meta = (biz.data.get("metadata") or {}) if biz and biz.data else {}
+        llm_id = meta.get("retell_llm_id")
+        if not llm_id:
+            return  # No Retell LLM provisioned for this business
+
+        config = get_business_chat_config(business_id)
+        if not config:
+            return
+
+        prompt = build_voice_prompt(config)
+
+        res = httpx.patch(
+            f"https://api.retellai.com/update-retell-llm/{llm_id}",
+            headers={
+                "Authorization": f"Bearer {settings.retell_api_key}",
+                "Content-Type": "application/json",
+            },
+            json={"general_prompt": prompt},
+            timeout=15,
+        )
+
+        if res.status_code == 200:
+            logger.info(f"Retell LLM {llm_id} synced with {len(config.get('faqs', []))} FAQs for business {business_id}")
+        else:
+            logger.error(f"Retell LLM sync failed ({res.status_code}): {res.text[:200]}")
+
+    except Exception as e:
+        logger.error(f"Retell sync error for business {business_id}: {e}")
 
 
 # ── Business Profile ──────────────────────────────────────────────────────────
@@ -75,6 +129,7 @@ async def create_faq(business_id: str, body: FAQItem):
         "category": body.category or "general",
         "active": body.active,
     }).execute()
+    _sync_retell_prompt(business_id)
     return {"status": "created", "faq": res.data[0]}
 
 
@@ -87,6 +142,7 @@ async def update_faq(faq_id: str, business_id: str, body: FAQItem):
         "category": body.category,
         "active": body.active,
     }).eq("id", faq_id).eq("business_id", business_id).execute()
+    _sync_retell_prompt(business_id)
     return {"status": "updated"}
 
 
@@ -94,6 +150,7 @@ async def update_faq(faq_id: str, business_id: str, body: FAQItem):
 async def delete_faq(faq_id: str, business_id: str):
     db = get_db()
     db.table("faqs").delete().eq("id", faq_id).eq("business_id", business_id).execute()
+    _sync_retell_prompt(business_id)
     return {"status": "deleted"}
 
 
@@ -229,3 +286,77 @@ async def update_booking_settings(business_id: str, body: dict):
     meta["booking_url"] = body.get("booking_url", "")
     db.table("businesses").update({"metadata": meta}).eq("id", business_id).execute()
     return {"status": "updated", "booking_url": meta["booking_url"]}
+
+
+# ── Notification Preferences ────────────────────────────────────────────────
+
+@router.get("/notifications")
+async def get_notification_prefs(business_id: str):
+    """Get notification preferences for a business."""
+    db = get_db()
+    res = db.table("notification_preferences").select("*").eq(
+        "business_id", business_id
+    ).maybe_single().execute()
+
+    if res and res.data:
+        return {
+            "notify_on_chat": res.data.get("notify_on_chat", True),
+            "notify_on_call": res.data.get("notify_on_call", True),
+            "notify_on_sms": res.data.get("notify_on_sms", True),
+        }
+
+    # Defaults: all on
+    return {"notify_on_chat": True, "notify_on_call": True, "notify_on_sms": True}
+
+
+@router.patch("/notifications")
+async def update_notification_prefs(business_id: str, body: dict):
+    """Update notification preferences. Plan-gated on backend."""
+    db = get_db()
+
+    # Get plan tier for gating
+    plan_res = db.table("subscription_plans").select("plan_tier").eq(
+        "business_id", business_id
+    ).eq("status", "active").maybe_single().execute()
+    plan_tier = plan_res.data.get("plan_tier", "starter") if plan_res and plan_res.data else "starter"
+
+    updates = {}
+
+    # Chat notifications: all plans
+    if "notify_on_chat" in body:
+        updates["notify_on_chat"] = bool(body["notify_on_chat"])
+
+    # Call notifications: pro and enterprise only
+    if "notify_on_call" in body:
+        if plan_tier not in ("pro", "enterprise"):
+            raise HTTPException(status_code=403, detail="Call notifications require Pro plan")
+        updates["notify_on_call"] = bool(body["notify_on_call"])
+
+    # SMS notifications: pro and enterprise only
+    if "notify_on_sms" in body:
+        if plan_tier not in ("pro", "enterprise"):
+            raise HTTPException(status_code=403, detail="SMS notifications require Pro plan")
+        updates["notify_on_sms"] = bool(body["notify_on_sms"])
+
+    if not updates:
+        return {"status": "no_changes"}
+
+    updates["updated_at"] = "now()"
+
+    # Upsert
+    existing = db.table("notification_preferences").select("id").eq(
+        "business_id", business_id
+    ).maybe_single().execute()
+
+    if existing and existing.data:
+        db.table("notification_preferences").update(updates).eq(
+            "business_id", business_id
+        ).execute()
+    else:
+        updates["business_id"] = business_id
+        updates["notify_on_chat"] = updates.get("notify_on_chat", True)
+        updates["notify_on_call"] = updates.get("notify_on_call", True)
+        updates["notify_on_sms"] = updates.get("notify_on_sms", True)
+        db.table("notification_preferences").insert(updates).execute()
+
+    return {"status": "updated", **updates}
