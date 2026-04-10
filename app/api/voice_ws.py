@@ -114,7 +114,7 @@ async def voice_websocket(websocket: WebSocket, business_id: str):
     ]
 
     # Add greeting to history — ask for their name
-    greeting = f"Hi! I'm Vela from {config.get('name', 'our business')}! Who do I have the pleasure of speaking with?"
+    greeting = f"Thanks for calling {config.get('name', 'our business')}! I'm Vela, who do I have the pleasure of speaking with today?"
     conversation_history.append({"role": "ai", "content": greeting})
 
     logger.info(f"Voice WS connected: business={business_id} session={session_id}")
