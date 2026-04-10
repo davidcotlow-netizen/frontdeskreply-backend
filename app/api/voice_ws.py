@@ -39,6 +39,46 @@ def strip_emojis(text: str) -> str:
     return text.replace("**", "").replace("*", "").replace("#", "").replace("_", "").strip()
 
 
+def _extract_name(text: str) -> str | None:
+    """
+    Extract a caller's name from their response to 'Who do I have the pleasure of speaking with?'
+    Returns the extracted name or None if we can't confidently parse one.
+    """
+    cleaned = text.strip().rstrip(".!,").strip()
+
+    # Strip common prefixes: "My name is ...", "This is ...", "I'm ...", "It's ...", "I am ..."
+    for prefix in [
+        r"(?:hi|hey|hello|oh)[\s,!]*",  # strip leading greetings
+    ]:
+        cleaned = re.sub(f"^{prefix}", "", cleaned, flags=re.IGNORECASE).strip()
+
+    for prefix in [
+        r"my name is\s+",
+        r"this is\s+",
+        r"i'?m\s+",
+        r"i am\s+",
+        r"it'?s\s+",
+        r"they call me\s+",
+        r"you can call me\s+",
+        r"people call me\s+",
+    ]:
+        cleaned = re.sub(f"^{prefix}", "", cleaned, flags=re.IGNORECASE).strip()
+
+    # If what's left is too long (>4 words), they probably asked a question instead of giving a name
+    words = cleaned.split()
+    if not words or len(words) > 4:
+        return None
+
+    # Capitalize each word as a proper name
+    name = " ".join(w.capitalize() for w in words)
+
+    # Sanity check — names shouldn't contain question marks or be common non-name words
+    if "?" in name or name.lower() in ("yes", "no", "yeah", "yep", "nope", "sure", "okay", "ok"):
+        return None
+
+    return name
+
+
 @router.websocket("/ws/voice/{business_id}")
 async def voice_websocket(websocket: WebSocket, business_id: str):
     """
@@ -61,6 +101,8 @@ async def voice_websocket(websocket: WebSocket, business_id: str):
     call_start = time.time()
     exchange_count = 0  # Track exchanges so silence detection only kicks in after first response
     nudge_sent = False  # True after we've sent a "still there?" prompt
+    caller_name = None  # Extracted from first response
+    awaiting_name = True  # True until we get the caller's name
 
     SILENCE_TIMEOUT = 10.0   # Seconds of silence before nudge
     NUDGE_TIMEOUT = 8.0      # Seconds after nudge before disconnect
@@ -71,8 +113,8 @@ async def voice_websocket(websocket: WebSocket, business_id: str):
         "It got quiet — are you still on the line?",
     ]
 
-    # Add greeting to history
-    greeting = f"Hi! I'm Vela from {config.get('name', 'our business')}. How can I help you today?"
+    # Add greeting to history — ask for their name
+    greeting = f"Hi! I'm Vela from {config.get('name', 'our business')}! Who do I have the pleasure of speaking with?"
     conversation_history.append({"role": "ai", "content": greeting})
 
     logger.info(f"Voice WS connected: business={business_id} session={session_id}")
@@ -127,6 +169,21 @@ async def voice_websocket(websocket: WebSocket, business_id: str):
                 add_call_transcript(session_id=session_id, role="caller", content=caller_text)
                 conversation_history.append({"role": "visitor", "content": caller_text})
 
+                # ── Name extraction on first response ────────────
+                if awaiting_name:
+                    caller_name = _extract_name(caller_text)
+                    awaiting_name = False
+                    if caller_name:
+                        logger.info(f"Caller name extracted: {caller_name}")
+                        # Send a warm personalized acknowledgement, then ask how to help
+                        name_reply = f"Nice to meet you, {caller_name}! How can I help you today?"
+                        await websocket.send_text(json.dumps({"type": "text", "token": name_reply, "last": True}))
+                        add_call_transcript(session_id=session_id, role="milo", content=name_reply)
+                        conversation_history.append({"role": "ai", "content": name_reply})
+                        exchange_count += 1
+                        continue  # Wait for their actual question
+                    # If we couldn't extract a name, they probably jumped straight to a question — continue normally
+
                 # Check for goodbye
                 goodbye_phrases = ["goodbye", "bye", "that's all", "nothing else", "no thanks", "i'm good", "hang up"]
                 if any(phrase in caller_text.lower() for phrase in goodbye_phrases):
@@ -152,6 +209,7 @@ async def voice_websocket(websocket: WebSocket, business_id: str):
                         business_config=config,
                         message_history=conversation_history[:-1],
                         visitor_message=caller_text,
+                        visitor_name=caller_name,
                         voice_mode=True,
                     ):
                         clean_chunk = strip_emojis(chunk)
