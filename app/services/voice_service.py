@@ -46,15 +46,18 @@ def create_call_session(
     return session
 
 
-def end_call_session(session_id: str, duration_seconds: int = 0) -> None:
-    """Mark a call session as ended with duration."""
+def end_call_session(session_id: str, duration_seconds: int = 0, caller_source: Optional[str] = None) -> None:
+    """Mark a call session as ended with duration and optional source (how they heard about us)."""
     db = get_db()
-    db.table("call_sessions").update({
+    update_data = {
         "ended_at": datetime.now(timezone.utc).isoformat(),
         "status": "ended",
         "duration_seconds": duration_seconds,
-    }).eq("id", session_id).execute()
-    logger.info(f"Call session ended: {session_id} ({duration_seconds}s)")
+    }
+    if caller_source:
+        update_data["caller_source"] = caller_source
+    db.table("call_sessions").update(update_data).eq("id", session_id).execute()
+    logger.info(f"Call session ended: {session_id} ({duration_seconds}s) source={caller_source}")
 
 
 def get_call_session(session_id: str) -> Optional[dict]:

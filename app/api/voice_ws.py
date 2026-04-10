@@ -79,6 +79,39 @@ def _extract_name(text: str) -> str | None:
     return name
 
 
+def _extract_source(text: str) -> str | None:
+    """
+    Extract how caller heard about the business from their response to 'How did you hear about us?'
+    Returns normalized source or None if unclear.
+    """
+    cleaned = text.lower().strip()
+
+    # Map common responses to standardized sources
+    source_map = {
+        "instagram": ["instagram", "@pawtyyoga", "ig"],
+        "google": ["google", "search", "googled"],
+        "website": ["website", "pawtyyoga.com", "web"],
+        "facebook": ["facebook", "fb"],
+        "friend": ["friend", "referred", "recommendation", "told me", "told us"],
+        "family": ["family", "relative"],
+        "word of mouth": ["word of mouth", "heard about"],
+        "event": ["event", "expo", "show"],
+        "tiktok": ["tiktok", "tik tok"],
+        "other": ["other", "don't know", "not sure"],
+    }
+
+    for source, keywords in source_map.items():
+        for keyword in keywords:
+            if keyword in cleaned:
+                return source
+
+    # If we can't classify but they gave an answer, save it as-is (up to 100 chars)
+    if len(cleaned) > 3 and len(cleaned) < 100:
+        return cleaned[:100]
+
+    return None
+
+
 @router.websocket("/ws/voice/{business_id}")
 async def voice_websocket(websocket: WebSocket, business_id: str):
     """
@@ -102,7 +135,9 @@ async def voice_websocket(websocket: WebSocket, business_id: str):
     exchange_count = 0  # Track exchanges so silence detection only kicks in after first response
     nudge_sent = False  # True after we've sent a "still there?" prompt
     caller_name = None  # Extracted from first response
+    caller_source = None  # How they heard about us
     awaiting_name = True  # True until we get the caller's name
+    awaiting_source = False  # True after name, waiting for source
 
     SILENCE_TIMEOUT = 10.0   # Seconds of silence before nudge
     NUDGE_TIMEOUT = 8.0      # Seconds after nudge before disconnect
@@ -175,14 +210,29 @@ async def voice_websocket(websocket: WebSocket, business_id: str):
                     awaiting_name = False
                     if caller_name:
                         logger.info(f"Caller name extracted: {caller_name}")
-                        # Send a warm personalized acknowledgement, then ask how to help
-                        name_reply = f"Nice to meet you, {caller_name}! How can I help you today?"
-                        await websocket.send_text(json.dumps({"type": "text", "token": name_reply, "last": True}))
-                        add_call_transcript(session_id=session_id, role="milo", content=name_reply)
-                        conversation_history.append({"role": "ai", "content": name_reply})
+                        # Ask how they heard about us before jumping to help
+                        source_question = f"Nice to meet you, {caller_name}! Quick question — how did you hear about us?"
+                        await websocket.send_text(json.dumps({"type": "text", "token": source_question, "last": True}))
+                        add_call_transcript(session_id=session_id, role="milo", content=source_question)
+                        conversation_history.append({"role": "ai", "content": source_question})
                         exchange_count += 1
-                        continue  # Wait for their actual question
+                        awaiting_source = True
+                        continue  # Wait for source answer
                     # If we couldn't extract a name, they probably jumped straight to a question — continue normally
+
+                # ── Source extraction (how they heard about us) ────────
+                if awaiting_source:
+                    caller_source = _extract_source(caller_text)
+                    awaiting_source = False
+                    if caller_source:
+                        logger.info(f"Caller source extracted: {caller_source}")
+                    # Send acknowledgement and ask how to help
+                    help_prompt = f"Thanks for letting me know! How can I help you today?"
+                    await websocket.send_text(json.dumps({"type": "text", "token": help_prompt, "last": True}))
+                    add_call_transcript(session_id=session_id, role="milo", content=help_prompt)
+                    conversation_history.append({"role": "ai", "content": help_prompt})
+                    exchange_count += 1
+                    continue  # Wait for their actual question
 
                 # Check for goodbye
                 goodbye_phrases = ["goodbye", "bye", "that's all", "nothing else", "no thanks", "i'm good", "hang up"]
@@ -262,8 +312,8 @@ async def voice_websocket(websocket: WebSocket, business_id: str):
     finally:
         duration = int(time.time() - call_start)
         if session_id:
-            end_call_session(session_id, duration_seconds=duration)
-        logger.info(f"Call ended: session={session_id} duration={duration}s")
+            end_call_session(session_id, duration_seconds=duration, caller_source=caller_source)
+        logger.info(f"Call ended: session={session_id} duration={duration}s source={caller_source}")
 
 
 # ── Dashboard endpoints ──────────────────────────────────────────────────────
