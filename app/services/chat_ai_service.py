@@ -134,6 +134,13 @@ class ChatAIService:
         if visitor_name:
             system_prompt += f"\n\nThe visitor's name is: {visitor_name}"
 
+        # Add booking link if available
+        booking_url = (business_config.get("metadata") or {}).get("booking_url", "") if isinstance(business_config.get("metadata"), dict) else ""
+        if not booking_url:
+            booking_url = business_config.get("booking_url", "")
+        if booking_url:
+            system_prompt += f"\n\nBOOKING: When a visitor wants to schedule, book an appointment, or reserve a time, direct them to this booking link: {booking_url}. Say something like: 'I can help with that! Book your preferred time here: {booking_url}'"
+
         if voice_mode:
             system_prompt += """
 

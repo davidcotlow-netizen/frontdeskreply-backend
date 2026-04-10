@@ -235,5 +235,6 @@ def get_business_chat_config(business_id: str) -> Optional[dict]:
         "tone": business.get("tone", "professional but warm"),
         "email": business.get("email", ""),
         "owner_phone": business.get("phone", ""),
+        "booking_url": (business.get("metadata") or {}).get("booking_url", ""),
         "faqs": faqs,
     }

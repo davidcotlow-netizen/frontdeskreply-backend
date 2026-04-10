@@ -193,5 +193,35 @@ async def get_widget_config(business_id: str):
         "greeting_message": meta.get("greeting_message", ""),
         "brand_color": meta.get("brand_color", "#E8714A"),
         "show_powered_by": False if (is_pro and meta.get("show_powered_by") == False) else True,
+        "booking_url": meta.get("booking_url", "") if is_pro else "",
         "business_name": biz.data.get("name", ""),
     }
+
+
+@router.get("/booking")
+async def get_booking_settings(business_id: str):
+    db = get_db()
+    biz = db.table("businesses").select("metadata").eq("id", business_id).maybe_single().execute()
+    if not biz or not biz.data:
+        raise HTTPException(status_code=404, detail="Business not found")
+    meta = biz.data.get("metadata") or {}
+    return {
+        "booking_url": meta.get("booking_url", ""),
+        "booking_enabled": bool(meta.get("booking_url")),
+    }
+
+
+@router.patch("/booking")
+async def update_booking_settings(business_id: str, body: dict):
+    db = get_db()
+    plan_res = db.table("subscription_plans").select("plan_tier").eq(
+        "business_id", business_id
+    ).eq("status", "active").maybe_single().execute()
+    if not plan_res or not plan_res.data or plan_res.data.get("plan_tier") != "pro":
+        raise HTTPException(status_code=403, detail="Appointment booking requires Pro plan")
+
+    biz = db.table("businesses").select("metadata").eq("id", business_id).maybe_single().execute()
+    meta = (biz.data.get("metadata") or {}) if biz and biz.data else {}
+    meta["booking_url"] = body.get("booking_url", "")
+    db.table("businesses").update({"metadata": meta}).eq("id", business_id).execute()
+    return {"status": "updated", "booking_url": meta["booking_url"]}

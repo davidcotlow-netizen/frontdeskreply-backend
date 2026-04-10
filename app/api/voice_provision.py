@@ -50,7 +50,9 @@ Name: {business_name}
 {f'Phone: {phone}' if phone else ''}
 
 FAQ KNOWLEDGE BASE:
-{faq_text}"""
+{faq_text}
+
+BOOKING: If a booking URL is configured and the caller wants to schedule or book an appointment, tell them you will text them the booking link after the call so they can pick their preferred time."""
 
 
 @router.post("/provision")
