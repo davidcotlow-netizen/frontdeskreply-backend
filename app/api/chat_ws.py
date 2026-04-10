@@ -25,7 +25,7 @@ from app.services.chat_service import (
     get_business_chat_config,
 )
 from app.services.chat_ai_service import get_chat_ai_service
-from app.services.notification_service import send_chat_escalation
+from app.services.notification_service import send_chat_escalation, send_chat_engagement_email
 
 logger = logging.getLogger(__name__)
 
@@ -326,6 +326,12 @@ async def chat_websocket(websocket: WebSocket, business_id: str):
     finally:
         if session_id:
             manager.disconnect(session_id)
+            # Send engagement notification if there was actual conversation
+            if ai_exchange_count > 0:
+                try:
+                    send_chat_engagement_email(business_id, session_id)
+                except Exception as e:
+                    logger.error(f"Chat engagement email failed: {e}")
             # Don't end session on disconnect — visitor might reconnect
             # Sessions are ended by timeout or explicit close
 

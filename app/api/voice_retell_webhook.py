@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 
 from app.core.database import get_db
 from app.services.voice_service import create_call_session, add_call_transcript, end_call_session
+from app.services.notification_service import send_call_engagement_email
 
 logger = logging.getLogger(__name__)
 
@@ -128,6 +129,13 @@ async def save_retell_call(call_data: dict):
             }).execute()
 
         logger.info(f"Saved {len(entries)} transcript entries for call {call_id}")
+
+    # Send engagement email to business owner
+    if business_id:
+        try:
+            send_call_engagement_email(business_id, session_id)
+        except Exception as e:
+            logger.error(f"Call engagement email failed: {e}")
 
 
 @router.post("/sync")

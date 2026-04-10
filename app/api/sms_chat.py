@@ -11,6 +11,7 @@ from app.services.voice_service import get_business_by_twilio_number
 from app.services.chat_service import get_business_chat_config, _find_or_create_contact
 from app.services.chat_ai_service import get_chat_ai_service
 from app.services.sms_service import send_sms
+from app.services.notification_service import send_sms_engagement_email
 from app.core.database import get_db
 
 logger = logging.getLogger(__name__)
@@ -86,6 +87,17 @@ async def sms_inbound(request: Request):
         full_response = full_response[:317] + "..."
 
     logger.info(f"Vela SMS reply: {full_response[:100]}")
+
+    # Notify business owner via email
+    try:
+        send_sms_engagement_email(
+            business_id=business_id,
+            from_number=from_number,
+            visitor_message=body,
+            vela_response=full_response,
+        )
+    except Exception as e:
+        logger.error(f"SMS engagement email failed: {e}")
 
     # Respond via TwiML <Message>
     escaped = full_response.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
