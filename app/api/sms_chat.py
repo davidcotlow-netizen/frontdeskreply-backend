@@ -1,6 +1,6 @@
 """
 SMS Chat — Frontdesk AI
-Handles inbound SMS texts with Milo AI responses.
+Handles inbound SMS texts with Vela AI responses.
 Same FAQ-powered AI as voice and chat, but via text message.
 """
 
@@ -22,7 +22,7 @@ router = APIRouter(prefix="/sms-chat", tags=["sms-chat"])
 async def sms_inbound(request: Request):
     """
     Twilio hits this when an SMS arrives.
-    Milo responds using the same FAQ knowledge base as voice and chat.
+    Vela responds using the same FAQ knowledge base as voice and chat.
     """
     form = await request.form()
     from_number = form.get("From", "")
@@ -62,7 +62,7 @@ async def sms_inbound(request: Request):
     # For now, treat each SMS as standalone (no history)
     history = []
 
-    # Generate Milo response
+    # Generate Vela response
     ai_service = get_chat_ai_service()
     full_response = ""
     try:
@@ -85,7 +85,7 @@ async def sms_inbound(request: Request):
     if len(full_response) > 320:
         full_response = full_response[:317] + "..."
 
-    logger.info(f"Milo SMS reply: {full_response[:100]}")
+    logger.info(f"Vela SMS reply: {full_response[:100]}")
 
     # Respond via TwiML <Message>
     escaped = full_response.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")

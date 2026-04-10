@@ -103,11 +103,18 @@ def get_call_transcripts(session_id: str, limit: int = 100) -> list:
 # ── Business phone mapping ───────────────────────────────────────────────────
 
 def get_business_by_twilio_number(phone_number: str) -> Optional[dict]:
-    """Look up which business owns a Twilio voice number."""
+    """Look up which business owns a Twilio number (voice or SMS)."""
     db = get_db()
     # Check channels table for voice type
     res = db.table("channels").select("business_id").eq(
         "channel_type", "voice"
+    ).eq("external_identifier", phone_number).maybe_single().execute()
+    if res and res.data:
+        return res.data
+
+    # Also check SMS channel type (same number may be used for both)
+    res = db.table("channels").select("business_id").eq(
+        "channel_type", "sms"
     ).eq("external_identifier", phone_number).maybe_single().execute()
     if res and res.data:
         return res.data
