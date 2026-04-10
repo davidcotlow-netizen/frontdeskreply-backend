@@ -56,8 +56,10 @@ async def retell_webhook(request: Request):
 
     logger.info(f"Retell webhook: event={event} call_id={call_data.get('call_id', '?')}")
 
-    if event == "call_ended" or "call_id" in call_data:
+    if event == "call_ended":
         await save_retell_call(call_data)
+    else:
+        logger.info(f"Retell webhook ignored: event={event} (only processing call_ended)")
 
     return {"status": "ok"}
 
