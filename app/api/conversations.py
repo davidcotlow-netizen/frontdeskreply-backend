@@ -246,8 +246,13 @@ async def get_lead_database(business_id: str):
 
 @router.patch("/leads/{lead_id}/status")
 async def update_lead_status(lead_id: str, body: dict):
-    """Update a lead's lifecycle status (new, contacted, quoted, converted)."""
+    """Update a lead's lifecycle status. Requires Growth or Pro plan."""
     db = get_db()
+    business_id = body.get("business_id", "")
+    if business_id:
+        plan_res = db.table("subscription_plans").select("plan_tier").eq("business_id", business_id).eq("status", "active").maybe_single().execute()
+        if not plan_res or not plan_res.data or plan_res.data.get("plan_tier") not in ("growth", "pro"):
+            raise HTTPException(status_code=403, detail="Lead status updates require Growth or Pro plan")
     status = body.get("status", "new")
     if status not in ("new", "contacted", "quoted", "converted"):
         raise HTTPException(status_code=400, detail="Invalid status")
@@ -409,8 +414,13 @@ async def get_chat_history(
 
 @router.post("/leads/{lead_id}/notes")
 async def add_lead_note(lead_id: str, body: dict):
-    """Add an internal note to a lead."""
+    """Add an internal note to a lead. Requires Pro plan."""
     db = get_db()
+    business_id = body.get("business_id", "")
+    if business_id:
+        plan_res = db.table("subscription_plans").select("plan_tier").eq("business_id", business_id).eq("status", "active").maybe_single().execute()
+        if not plan_res or not plan_res.data or plan_res.data.get("plan_tier") != "pro":
+            raise HTTPException(status_code=403, detail="Lead notes require Pro plan")
     note = body.get("note", "").strip()
     if not note:
         raise HTTPException(status_code=400, detail="Note cannot be empty")
@@ -451,13 +461,20 @@ async def get_lead_notes(lead_id: str):
 
 @router.post("/leads/send-email")
 async def send_bulk_email(body: dict):
-    """Send an email to selected leads from the dashboard."""
+    """Send an email to selected leads. Requires Growth or Pro plan."""
     from app.services.email_service import send_email
 
     emails = body.get("emails", [])
     subject = body.get("subject", "")
     message = body.get("message", "")
     business_id = body.get("business_id", "")
+
+    # Plan gate: Growth or Pro required
+    if business_id:
+        _db = get_db()
+        plan_res = _db.table("subscription_plans").select("plan_tier").eq("business_id", business_id).eq("status", "active").maybe_single().execute()
+        if not plan_res or not plan_res.data or plan_res.data.get("plan_tier") not in ("growth", "pro"):
+            raise HTTPException(status_code=403, detail="Email outreach requires Growth or Pro plan")
 
     if not emails or not subject or not message:
         raise HTTPException(status_code=400, detail="emails, subject, and message are required")
