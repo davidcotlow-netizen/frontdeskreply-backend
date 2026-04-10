@@ -14,6 +14,7 @@ ConversationRelay protocol:
 import asyncio
 import json
 import logging
+import random
 import re
 import time
 
@@ -58,6 +59,17 @@ async def voice_websocket(websocket: WebSocket, business_id: str):
     ai_service = get_chat_ai_service()
     conversation_history = []
     call_start = time.time()
+    exchange_count = 0  # Track exchanges so silence detection only kicks in after first response
+    nudge_sent = False  # True after we've sent a "still there?" prompt
+
+    SILENCE_TIMEOUT = 10.0   # Seconds of silence before nudge
+    NUDGE_TIMEOUT = 8.0      # Seconds after nudge before disconnect
+    NUDGE_PHRASES = [
+        "Are you still there?",
+        "Hey, are you still with me?",
+        "Still there? I'm happy to help if you have more questions!",
+        "It got quiet — are you still on the line?",
+    ]
 
     # Add greeting to history
     greeting = f"Hi! I'm Vela from {config.get('name', 'our business')}. How can I help you today?"
@@ -67,7 +79,34 @@ async def voice_websocket(websocket: WebSocket, business_id: str):
 
     try:
         while True:
-            raw = await websocket.receive_text()
+            # ── Receive with silence detection ───────────────────
+            try:
+                if exchange_count > 0:
+                    timeout = NUDGE_TIMEOUT if nudge_sent else SILENCE_TIMEOUT
+                    raw = await asyncio.wait_for(websocket.receive_text(), timeout=timeout)
+                else:
+                    # No timeout for the very first message (caller may still be hearing the greeting)
+                    raw = await websocket.receive_text()
+                nudge_sent = False  # Reset on any incoming message
+            except asyncio.TimeoutError:
+                if not nudge_sent:
+                    # First silence — send a nudge
+                    nudge = random.choice(NUDGE_PHRASES)
+                    await websocket.send_text(json.dumps({"type": "text", "token": nudge, "last": True}))
+                    add_call_transcript(session_id=session_id, role="milo", content=nudge)
+                    conversation_history.append({"role": "ai", "content": nudge})
+                    nudge_sent = True
+                    logger.info(f"Silence nudge sent: session={session_id}")
+                    continue
+                else:
+                    # Second silence — end the call
+                    farewell = "No worries! It sounds like you may have stepped away. Thanks for calling — feel free to call back anytime. Bye!"
+                    await websocket.send_text(json.dumps({"type": "text", "token": farewell, "last": True}))
+                    add_call_transcript(session_id=session_id, role="milo", content=farewell)
+                    await websocket.send_text(json.dumps({"type": "end"}))
+                    logger.info(f"Call ended due to silence: session={session_id}")
+                    break
+
             data = json.loads(raw)
             msg_type = data.get("type", "")
 
@@ -141,6 +180,7 @@ async def voice_websocket(websocket: WebSocket, business_id: str):
                 if full_response:
                     add_call_transcript(session_id=session_id, role="milo", content=full_response)
                     conversation_history.append({"role": "ai", "content": full_response})
+                    exchange_count += 1
 
             # ── Interrupt ────────────────────────────────────────
             if msg_type == "interrupt":
