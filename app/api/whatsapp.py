@@ -92,7 +92,7 @@ async def whatsapp_inbound(request: Request):
     plan_res = db.table("subscription_plans").select("plan_tier").eq(
         "business_id", business_id
     ).eq("status", "active").maybe_single().execute()
-    if not plan_res or not plan_res.data or plan_res.data.get("plan_tier") not in ("pro", "enterprise"):
+    if not plan_res or not plan_res.data or plan_res.data.get("plan_tier") != "enterprise":
         return Response(
             content='<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
             media_type="application/xml"

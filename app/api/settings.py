@@ -159,7 +159,7 @@ async def update_widget_branding(business_id: str, body: WidgetBrandingUpdate):
     plan_res = db.table("subscription_plans").select("plan_tier").eq(
         "business_id", business_id
     ).eq("status", "active").maybe_single().execute()
-    if not plan_res or not plan_res.data or plan_res.data.get("plan_tier") != "pro":
+    if not plan_res or not plan_res.data or plan_res.data.get("plan_tier") not in ("pro", "enterprise"):
         raise HTTPException(status_code=403, detail="Widget branding customization requires Pro plan")
 
     # Get current metadata
@@ -217,7 +217,7 @@ async def update_booking_settings(business_id: str, body: dict):
     plan_res = db.table("subscription_plans").select("plan_tier").eq(
         "business_id", business_id
     ).eq("status", "active").maybe_single().execute()
-    if not plan_res or not plan_res.data or plan_res.data.get("plan_tier") != "pro":
+    if not plan_res or not plan_res.data or plan_res.data.get("plan_tier") not in ("pro", "enterprise"):
         raise HTTPException(status_code=403, detail="Appointment booking requires Pro plan")
 
     biz = db.table("businesses").select("metadata").eq("id", business_id).maybe_single().execute()

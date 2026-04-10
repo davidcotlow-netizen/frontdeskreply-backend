@@ -133,7 +133,7 @@ def check_business_voice_eligible(business_id: str) -> bool:
     if not plan_res or not plan_res.data:
         return False
 
-    return plan_res.data.get("plan_tier") == "pro"
+    return plan_res.data.get("plan_tier") in ("pro", "enterprise")
 
 
 # ── Call history for dashboard ───────────────────────────────────────────────

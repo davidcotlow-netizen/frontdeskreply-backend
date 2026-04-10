@@ -419,8 +419,8 @@ async def add_lead_note(lead_id: str, body: dict):
     business_id = body.get("business_id", "")
     if business_id:
         plan_res = db.table("subscription_plans").select("plan_tier").eq("business_id", business_id).eq("status", "active").maybe_single().execute()
-        if not plan_res or not plan_res.data or plan_res.data.get("plan_tier") != "pro":
-            raise HTTPException(status_code=403, detail="Lead notes require Pro plan")
+        if not plan_res or not plan_res.data or plan_res.data.get("plan_tier") not in ("pro", "enterprise"):
+            raise HTTPException(status_code=403, detail="Lead notes require Pro or Enterprise plan")
     note = body.get("note", "").strip()
     if not note:
         raise HTTPException(status_code=400, detail="Note cannot be empty")

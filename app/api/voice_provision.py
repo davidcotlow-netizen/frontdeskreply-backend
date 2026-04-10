@@ -69,8 +69,8 @@ async def provision_voice_ai(business_id: str):
         "business_id", business_id
     ).eq("status", "active").maybe_single().execute()
 
-    if not plan_res or not plan_res.data or plan_res.data.get("plan_tier") != "pro":
-        raise HTTPException(status_code=403, detail="Voice AI requires Pro plan")
+    if not plan_res or not plan_res.data or plan_res.data.get("plan_tier") not in ("pro", "enterprise"):
+        raise HTTPException(status_code=403, detail="Voice AI requires Pro or Enterprise plan")
 
     # Check if already provisioned
     existing = db.table("channels").select("id, external_identifier").eq(
