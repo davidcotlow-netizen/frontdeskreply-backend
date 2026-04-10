@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import get_settings
-from app.api import webhooks, messages, queue, conversations, analytics, billing, settings, chat_ws, voice_webhook, voice_ws, sms_chat, voice_retell, voice_retell_webhook, voice_provision, whatsapp, admin
+from app.api import webhooks, messages, queue, conversations, analytics, billing, settings, chat_ws, voice_webhook, voice_ws, sms_chat, voice_retell, voice_retell_webhook, voice_provision, whatsapp, admin, email_inbound, facebook
 
 settings_obj = get_settings()
 
@@ -39,6 +39,8 @@ app.include_router(voice_retell_webhook.router, prefix="/api/v1")  # Retell AI w
 app.include_router(voice_provision.router, prefix="/api/v1")  # Voice AI self-service provisioning
 app.include_router(whatsapp.router, prefix="/api/v1")  # WhatsApp chat with Vela
 app.include_router(admin.router, prefix="/api/v1")  # Admin dashboard for DJ
+app.include_router(email_inbound.router, prefix="/api/v1")  # Email auto-reply (all plans)
+app.include_router(facebook.router, prefix="/api/v1")  # Facebook + Instagram (Enterprise)
 app.include_router(voice_retell.router)  # Retell AI voice WebSocket
 
 @app.get("/health")
