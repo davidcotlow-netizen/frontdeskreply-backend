@@ -178,11 +178,15 @@ async def update_widget_branding(business_id: str, body: WidgetBrandingUpdate):
 async def get_widget_config(business_id: str):
     """Public endpoint — widget.js calls this to get branding settings."""
     db = get_db()
-    biz = db.table("businesses").select("name, metadata").eq("id", business_id).maybe_single().execute()
+    try:
+        biz = db.table("businesses").select("name, metadata").eq("id", business_id).maybe_single().execute()
+    except Exception:
+        # Fallback if metadata column doesn't exist
+        biz = db.table("businesses").select("name").eq("id", business_id).maybe_single().execute()
     if not biz or not biz.data:
         return {"chatbot_name": "Vela", "brand_color": "#E8714A", "show_powered_by": True, "business_name": ""}
 
-    meta = biz.data.get("metadata") or {}
+    meta = biz.data.get("metadata") or {} if "metadata" in (biz.data or {}) else {}
     plan_res = db.table("subscription_plans").select("plan_tier").eq(
         "business_id", business_id
     ).eq("status", "active").maybe_single().execute()
