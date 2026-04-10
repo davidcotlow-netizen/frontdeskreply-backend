@@ -86,6 +86,22 @@ def send_chat_escalation_email(
 
 # ── Engagement notification helpers ─────────────────────────────────────────
 
+def _check_notification_enabled(business_id: str, channel: str) -> bool:
+    """Check if notifications are enabled for a given channel (chat, call, sms)."""
+    db = get_db()
+    try:
+        res = db.table("notification_preferences").select("*").eq(
+            "business_id", business_id
+        ).maybe_single().execute()
+        if res and res.data:
+            key = f"notify_on_{channel}"
+            return res.data.get(key, True)
+    except Exception as e:
+        logger.warning(f"Failed to check notification prefs: {e}")
+    # Default: enabled
+    return True
+
+
 def _get_owner_email(business_id: str) -> str | None:
     """Get the business owner's email from the businesses table."""
     db = get_db()
@@ -138,6 +154,10 @@ def send_chat_engagement_email(business_id: str, session_id: str) -> dict:
     Send a summary email to the business owner after a chat session ends.
     Includes visitor info + full conversation transcript.
     """
+    if not _check_notification_enabled(business_id, "chat"):
+        logger.info(f"Chat notifications disabled for business {business_id}")
+        return {"status": "skipped", "reason": "notifications_disabled"}
+
     settings = get_settings()
     if not settings.resend_api_key:
         logger.warning("Resend not configured — chat engagement email skipped")
@@ -224,6 +244,10 @@ def send_call_engagement_email(business_id: str, session_id: str) -> dict:
     Send a summary email to the business owner after a voice call ends.
     Includes caller info + transcript.
     """
+    if not _check_notification_enabled(business_id, "call"):
+        logger.info(f"Call notifications disabled for business {business_id}")
+        return {"status": "skipped", "reason": "notifications_disabled"}
+
     settings = get_settings()
     if not settings.resend_api_key:
         logger.warning("Resend not configured — call engagement email skipped")
@@ -313,6 +337,10 @@ def send_sms_engagement_email(
     """
     Send a summary email to the business owner after an SMS exchange.
     """
+    if not _check_notification_enabled(business_id, "sms"):
+        logger.info(f"SMS notifications disabled for business {business_id}")
+        return {"status": "skipped", "reason": "notifications_disabled"}
+
     settings = get_settings()
     if not settings.resend_api_key:
         logger.warning("Resend not configured — SMS engagement email skipped")

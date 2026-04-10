@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 from datetime import datetime, timezone, timedelta
-from collections import Counter
+from collections import Counter, defaultdict
 from app.core.database import get_db
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
@@ -281,3 +281,153 @@ async def response_time_trend(business_id: str, period: str = "week"):
         result.append({"date": day, "avg_seconds": avg, "count": len(times)})
 
     return {"data": result}
+
+
+# ── New analytics endpoints ─────────────────────────────────────────────────
+
+
+@router.get("/lead-sources")
+async def lead_source_breakdown(business_id: str, period: str = "month"):
+    """Breakdown of how leads heard about the business (from call caller_source)."""
+    db = get_db()
+    start, _ = _date_range(period)
+
+    calls_res = db.table("call_sessions").select(
+        "caller_source"
+    ).eq("business_id", business_id).gte("started_at", start).execute()
+
+    source_counts: dict[str, int] = {}
+    total = 0
+    for c in (calls_res.data or []):
+        src = c.get("caller_source")
+        if src:
+            source_counts[src] = source_counts.get(src, 0) + 1
+            total += 1
+
+    # Also count channel sources (chat vs call)
+    chats_res = db.table("chat_sessions").select("id").eq(
+        "business_id", business_id
+    ).gte("started_at", start).execute()
+    calls_total = len(calls_res.data or [])
+    chats_total = len(chats_res.data or [])
+
+    sources = sorted(source_counts.items(), key=lambda x: x[1], reverse=True)
+
+    return {
+        "sources": [{"source": s, "count": c} for s, c in sources],
+        "total_with_source": total,
+        "channel_breakdown": {"chat": chats_total, "phone": calls_total},
+    }
+
+
+@router.get("/conversion-funnel")
+async def conversion_funnel(business_id: str, period: str = "month"):
+    """Conversion funnel: interactions → chats → leads → contacted → converted."""
+    db = get_db()
+    start, _ = _date_range(period)
+
+    sessions_res = db.table("chat_sessions").select(
+        "id, visitor_email, metadata"
+    ).eq("business_id", business_id).gte("started_at", start).execute()
+    sessions = sessions_res.data or []
+
+    chats_started = len(sessions)
+    leads_captured = sum(
+        1 for s in sessions
+        if s.get("visitor_email") or (s.get("metadata") or {}).get("visitor_phone")
+    )
+
+    calls_res = db.table("call_sessions").select("id, caller_phone").eq(
+        "business_id", business_id
+    ).gte("started_at", start).execute()
+    calls = calls_res.data or []
+    calls_with_phone = sum(1 for c in calls if c.get("caller_phone"))
+
+    total_leads = leads_captured + calls_with_phone
+
+    contacts_res = db.table("contacts").select("status").eq(
+        "business_id", business_id
+    ).execute()
+    contacts = contacts_res.data or []
+
+    contacted = sum(1 for c in contacts if c.get("status") in ("contacted", "quoted", "converted"))
+    converted = sum(1 for c in contacts if c.get("status") == "converted")
+
+    total_interactions = chats_started + len(calls)
+
+    return {
+        "funnel": [
+            {"stage": "Total Interactions", "count": total_interactions},
+            {"stage": "Chats Started", "count": chats_started},
+            {"stage": "Leads Captured", "count": total_leads},
+            {"stage": "Contacted", "count": contacted},
+            {"stage": "Converted", "count": converted},
+        ],
+    }
+
+
+@router.get("/peak-hours")
+async def peak_hours(business_id: str, period: str = "month"):
+    """Activity heatmap: hour of day x day of week for chats + calls."""
+    db = get_db()
+    start, _ = _date_range(period)
+
+    chats_res = db.table("chat_sessions").select("started_at").eq(
+        "business_id", business_id
+    ).gte("started_at", start).execute()
+
+    calls_res = db.table("call_sessions").select("started_at").eq(
+        "business_id", business_id
+    ).gte("started_at", start).execute()
+
+    heatmap = defaultdict(lambda: defaultdict(int))
+    day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+    for item in (chats_res.data or []) + (calls_res.data or []):
+        try:
+            dt = datetime.fromisoformat(item["started_at"].replace("Z", "+00:00"))
+            day = day_names[dt.weekday()]
+            hour = dt.hour
+            heatmap[day][hour] += 1
+        except Exception:
+            pass
+
+    result = []
+    for day in day_names:
+        for hour in range(24):
+            count = heatmap[day][hour]
+            if count > 0:
+                result.append({"day": day, "hour": hour, "count": count})
+
+    max_count = max((r["count"] for r in result), default=0)
+
+    return {"data": result, "max_count": max_count, "days": day_names}
+
+
+@router.get("/follow-up-reminders")
+async def follow_up_reminders(business_id: str):
+    """Leads that need follow-up: status is new and last contact was 48+ hours ago."""
+    db = get_db()
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
+
+    contacts_res = db.table("contacts").select(
+        "id, name, email, phone, last_seen_at, source_channel"
+    ).eq("business_id", business_id).execute()
+
+    needs_followup = []
+    for c in (contacts_res.data or []):
+        last_seen = c.get("last_seen_at") or ""
+        status = c.get("status") or "new"
+        if status == "new" and last_seen and last_seen < cutoff:
+            needs_followup.append({
+                "id": c["id"],
+                "name": c.get("name") or "Unknown",
+                "email": c.get("email"),
+                "phone": c.get("phone"),
+                "last_contact": last_seen,
+                "source": c.get("source_channel") or "unknown",
+            })
+
+    needs_followup.sort(key=lambda x: x["last_contact"])
+
+    return {"leads": needs_followup, "count": len(needs_followup)}
