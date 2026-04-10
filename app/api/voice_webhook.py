@@ -62,7 +62,7 @@ async def inbound_call(request: Request):
     session = create_call_session(business_id=business_id, caller_phone=from_number, call_sid=call_sid)
     session_id = session["id"]
 
-    greeting = f"Hi! I'm Milo from {business_name}. How can I help you today?"
+    greeting = f"Hi! I'm Vela from {business_name}. How can I help you today?"
     add_call_transcript(session_id=session_id, role="milo", content=greeting)
 
     twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
@@ -139,7 +139,7 @@ async def respond_to_speech(request: Request):
         full_response = f"I'm sorry, I'm having trouble right now. Please call us at {phone} for help."
 
     full_response = strip_emojis(full_response)
-    logger.info(f"Milo says: '{full_response[:100]}'")
+    logger.info(f"Vela says: '{full_response[:100]}'")
     add_call_transcript(session_id=session_id, role="milo", content=full_response)
 
     twiml = f"""<?xml version="1.0" encoding="UTF-8"?>

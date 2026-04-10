@@ -4,7 +4,7 @@ Handles Twilio ConversationRelay WebSocket for streaming voice AI.
 
 ConversationRelay protocol:
 - Twilio sends: {"type": "prompt", "voicePrompt": "caller speech text"}
-- Twilio sends: {"type": "interrupt"} when caller talks over Milo
+- Twilio sends: {"type": "interrupt"} when caller talks over Vela
 - Twilio sends: {"type": "setup", ...} on connection
 - Twilio sends: {"type": "dtmf", "digit": "1"} for keypad
 - We send: {"type": "text", "token": "word"} for streaming
@@ -60,7 +60,7 @@ async def voice_websocket(websocket: WebSocket, business_id: str):
     call_start = time.time()
 
     # Add greeting to history
-    greeting = f"Hi! I'm Milo from {config.get('name', 'our business')}. How can I help you today?"
+    greeting = f"Hi! I'm Vela from {config.get('name', 'our business')}. How can I help you today?"
     conversation_history.append({"role": "ai", "content": greeting})
 
     logger.info(f"Voice WS connected: business={business_id} session={session_id}")
@@ -137,7 +137,7 @@ async def voice_websocket(websocket: WebSocket, business_id: str):
                     await websocket.send_text(json.dumps({"type": "text", "token": fallback, "last": True}))
                     full_response = fallback
 
-                # Save Milo response
+                # Save Vela response
                 if full_response:
                     add_call_transcript(session_id=session_id, role="milo", content=full_response)
                     conversation_history.append({"role": "ai", "content": full_response})

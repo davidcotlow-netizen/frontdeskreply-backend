@@ -79,7 +79,7 @@ async def voice_retell_ws(websocket: WebSocket, business_id: str):
                 session_id = session["id"]
 
                 # Add greeting to history
-                greeting = f"Hi! I'm Milo from {config.get('name', 'our business')}. How can I help you today?"
+                greeting = f"Hi! I'm Vela from {config.get('name', 'our business')}. How can I help you today?"
                 conversation_history.append({"role": "ai", "content": greeting})
                 add_call_transcript(session_id=session_id, role="milo", content=greeting)
 
@@ -179,7 +179,7 @@ async def voice_retell_ws(websocket: WebSocket, business_id: str):
                     }))
                     full_response = fallback
 
-                # Save Milo response
+                # Save Vela response
                 if session_id and full_response:
                     add_call_transcript(session_id=session_id, role="milo", content=full_response)
 

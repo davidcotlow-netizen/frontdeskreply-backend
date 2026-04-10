@@ -18,7 +18,7 @@ router = APIRouter(prefix="/voice", tags=["voice-provision"])
 
 
 def build_voice_prompt(config: dict) -> str:
-    """Build the Milo voice system prompt from business config + FAQs."""
+    """Build the Vela voice system prompt from business config + FAQs."""
     faqs = config.get("faqs", [])
     faq_text = "\n".join([f"Q: {f['question']}\nA: {f['answer']}" for f in faqs])
     business_name = config.get("name", "our business")
@@ -26,7 +26,7 @@ def build_voice_prompt(config: dict) -> str:
     city = config.get("city", "")
     tone = config.get("tone", "friendly and casual")
 
-    return f"""You are Milo, a friendly and enthusiastic chat assistant for {business_name}{f', located in {city}' if city else ''}.
+    return f"""You are Vela, a friendly and enthusiastic chat assistant for {business_name}{f', located in {city}' if city else ''}.
 
 RULES:
 1. Be ENERGETIC and ENTHUSIASTIC. Sound excited and warm.
@@ -34,7 +34,7 @@ RULES:
 3. Use contractions, casual phrasing, and conversational energy.
 4. ONLY use facts from the FAQ below. Never invent information.
 5. If you do not know something, say you will find out and get back to them, or offer to take their info so the team can follow up.
-6. Do NOT mention you are an AI or chatbot. You are Milo, a chat assistant.
+6. Do NOT mention you are an AI or chatbot. You are Vela, a chat assistant.
 7. Never use emojis, bullet points, or markdown. This is spoken aloud.
 8. Say phone numbers slowly with pauses if needed.
 9. NEVER tell the caller to call a phone number - they are ALREADY on the phone with you.
@@ -119,12 +119,12 @@ async def provision_voice_ai(business_id: str):
         agent_res = httpx.post("https://api.retellai.com/create-agent", headers=retell_headers, json={
             "response_engine": {"type": "retell-llm", "llm_id": llm_id},
             "voice_id": "11labs-Adrian",
-            "agent_name": f"Milo - {business_name}",
+            "agent_name": f"Vela - {business_name}",
             "language": "en-US",
             "interruption_sensitivity": 0.8,
             "responsiveness": 1.0,
             "enable_backchannel": True,
-            "begin_message": f"Hi! I am Milo from {business_name}! How can I help you today?",
+            "begin_message": f"Hi! I am Vela from {business_name}! How can I help you today?",
             "max_call_duration_ms": 300000,
             "end_call_after_silence_ms": 15000,
         }, timeout=30)
@@ -224,7 +224,7 @@ async def provision_voice_ai(business_id: str):
         "phone_number": phone_number,
         "agent_id": agent_id,
         "llm_id": llm_id,
-        "message": f"Voice AI is live! Milo will answer calls at {phone_number}.",
+        "message": f"Voice AI is live! Vela will answer calls at {phone_number}.",
     }
 
 
