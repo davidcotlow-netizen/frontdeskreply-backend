@@ -129,6 +129,7 @@ async def provision_voice_ai(business_id: str):
             "interruption_sensitivity": 0.8,
             "responsiveness": 1.0,
             "enable_backchannel": True,
+            "enable_recording": True,
             "begin_message": f"Thanks for calling {business_name}! I'm Vela, who do I have the pleasure of speaking with today?",
             "max_call_duration_ms": 300000,
             "end_call_after_silence_ms": 15000,

@@ -74,6 +74,7 @@ async def save_retell_call(call_data: dict):
     transcript_str = call_data.get("transcript", "")
     call_status = call_data.get("call_status", "ended")
     start_ts = call_data.get("start_timestamp")
+    recording_url = call_data.get("recording_url") or ""
 
     # Look up business by agent
     # For now, map the known agent to Pawty Yoga
@@ -89,12 +90,15 @@ async def save_retell_call(call_data: dict):
     existing = db.table("call_sessions").select("id").eq("call_sid", call_id).maybe_single().execute()
     if existing and existing.data:
         session_id = existing.data["id"]
-        # Update with duration
-        db.table("call_sessions").update({
+        # Update with duration and recording URL
+        update_payload = {
             "duration_seconds": duration_ms // 1000,
             "status": "ended" if call_status == "ended" else call_status,
             "ended_at": datetime.now(timezone.utc).isoformat(),
-        }).eq("id", session_id).execute()
+        }
+        if recording_url:
+            update_payload["recording_url"] = recording_url
+        db.table("call_sessions").update(update_payload).eq("id", session_id).execute()
     else:
         # Create new session
         started_at = datetime.fromtimestamp(start_ts / 1000, tz=timezone.utc).isoformat() if start_ts else datetime.now(timezone.utc).isoformat()
@@ -107,6 +111,7 @@ async def save_retell_call(call_data: dict):
             "duration_seconds": duration_ms // 1000,
             "status": "ended",
             "call_sid": call_id,
+            "recording_url": recording_url,
             "metadata": {"retell_agent": agent_id},
         }).execute()
         session_id = session_res.data[0]["id"]

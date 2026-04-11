@@ -348,6 +348,7 @@ async def get_call_history_endpoint(
             "status": session.get("status", "ended"),
             "transcript_count": len(transcripts),
             "last_caller_message": last_caller,
+            "recording_url": session.get("recording_url") or "",
             "transcripts": transcripts,
         })
 
