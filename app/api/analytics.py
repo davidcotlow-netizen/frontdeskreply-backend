@@ -1,9 +1,21 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from datetime import datetime, timezone, timedelta
 from collections import Counter, defaultdict
 from app.core.database import get_db
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
+
+
+def _check_plan(business_id: str, required_tiers: tuple) -> str:
+    """Check if business is on a required plan tier. Returns the tier or raises 403."""
+    db = get_db()
+    res = db.table("subscription_plans").select("plan_tier").eq(
+        "business_id", business_id
+    ).eq("status", "active").execute()
+    tier = res.data[0].get("plan_tier", "starter") if res.data else "starter"
+    if tier not in required_tiers:
+        raise HTTPException(status_code=403, detail=f"This feature requires {required_tiers[0].title()}+ plan")
+    return tier
 
 
 def _date_range(period: str):
@@ -288,7 +300,8 @@ async def response_time_trend(business_id: str, period: str = "week"):
 
 @router.get("/lead-sources")
 async def lead_source_breakdown(business_id: str, period: str = "month"):
-    """Breakdown of how leads heard about the business (from call caller_source)."""
+    """Breakdown of how leads heard about the business (from call caller_source). Growth+ only."""
+    _check_plan(business_id, ("growth", "pro", "enterprise"))
     db = get_db()
     start, _ = _date_range(period)
 
@@ -322,7 +335,8 @@ async def lead_source_breakdown(business_id: str, period: str = "month"):
 
 @router.get("/conversion-funnel")
 async def conversion_funnel(business_id: str, period: str = "month"):
-    """Conversion funnel: interactions → chats → leads → contacted → converted."""
+    """Conversion funnel: interactions → chats → leads → contacted → converted. Growth+ only."""
+    _check_plan(business_id, ("growth", "pro", "enterprise"))
     db = get_db()
     start, _ = _date_range(period)
 
@@ -368,7 +382,8 @@ async def conversion_funnel(business_id: str, period: str = "month"):
 
 @router.get("/peak-hours")
 async def peak_hours(business_id: str, period: str = "month"):
-    """Activity heatmap: hour of day x day of week for chats + calls."""
+    """Activity heatmap: hour of day x day of week for chats + calls. Growth+ only."""
+    _check_plan(business_id, ("growth", "pro", "enterprise"))
     db = get_db()
     start, _ = _date_range(period)
 

@@ -50,7 +50,7 @@ RULES:
 7. Always include the phone number {phone} when you can't fully answer a question or when the visitor needs to take action (booking, scheduling, etc.).
 8. Be warm and personable — use the visitor's name if provided.
 9. TRANSITION VARIETY (CRITICAL): Do NOT overuse any single transition phrase like "That's a good question" or "Great question." Rotate naturally through varied transitions before answering, such as: "Sure, I can explain that", "Here's how that works", "I can help with that", "Let me give you the details", "That comes up pretty often", "Happy to help", "No problem at all", "Here's the answer", "Absolutely, let me walk you through it", "I'd be happy to explain", "A lot of people ask about that", "Let me clear that up for you." Never use the same transition more than once per conversation. Sometimes skip the transition entirely and just answer directly.
-10. MULTI-LANGUAGE (CRITICAL): If the visitor writes ANY language other than English, you MUST respond ENTIRELY in that language for the rest of the conversation. Do NOT mix languages. Translate your FAQ answers into their language. Every single word must be in their language.
+{multi_language_rule}
 
 BUSINESS INFO:
 Name: {business_name}
@@ -80,12 +80,16 @@ class ChatAIService:
             self.model = settings.claude_model
             logger.info(f"ChatAIService initialized in LIVE MODE (model={self.model})")
 
-    def _build_system_prompt(self, config: dict) -> str:
+    def _build_system_prompt(self, config: dict, plan_tier: str = "starter") -> str:
         """Build the system prompt from business config."""
         faqs = config.get("faqs", [])
         faq_block = "\n".join(
             [f"Q: {f['question']}\nA: {f['answer']}" for f in faqs]
         ) or "(No FAQ data configured)"
+
+        multi_lang = ""
+        if plan_tier in ("pro", "enterprise"):
+            multi_lang = "10. MULTI-LANGUAGE (CRITICAL): If the visitor writes ANY language other than English, you MUST respond ENTIRELY in that language for the rest of the conversation. Do NOT mix languages. Translate your FAQ answers into their language. Every single word must be in their language."
 
         return CHAT_SYSTEM_PROMPT.format(
             business_name=config.get("name", "our business"),
@@ -96,6 +100,7 @@ class ChatAIService:
             service_areas=config.get("service_areas", ""),
             tone=config.get("tone", "professional but warm"),
             faq_block=faq_block,
+            multi_language_rule=multi_lang,
         )
 
     def _build_messages(self, message_history: list, visitor_message: str) -> list:
@@ -119,6 +124,7 @@ class ChatAIService:
         visitor_message: str,
         visitor_name: Optional[str] = None,
         voice_mode: bool = False,
+        plan_tier: str = "starter",
     ) -> AsyncGenerator[str, None]:
         """
         Stream Claude's response token by token.
@@ -131,7 +137,7 @@ class ChatAIService:
                 yield chunk
             return
 
-        system_prompt = self._build_system_prompt(business_config)
+        system_prompt = self._build_system_prompt(business_config, plan_tier=plan_tier)
         if visitor_name:
             system_prompt += f"\n\nThe visitor's name is: {visitor_name}"
 

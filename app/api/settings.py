@@ -87,8 +87,14 @@ def _sync_retell_prompt(business_id: str) -> dict:
         if not config:
             return {"status": "error", "reason": "business_not_found", "faq_count": 0}
 
+        # Get plan tier for feature gating (multi-language is Pro+ only)
+        plan_res = db.table("subscription_plans").select("plan_tier").eq(
+            "business_id", business_id
+        ).eq("status", "active").execute()
+        plan_tier = plan_res.data[0].get("plan_tier", "pro") if plan_res.data else "pro"
+
         faq_count = len(config.get("faqs", []))
-        prompt = build_voice_prompt(config)
+        prompt = build_voice_prompt(config, plan_tier=plan_tier)
 
         retell_headers = {
             "Authorization": f"Bearer {settings.retell_api_key}",

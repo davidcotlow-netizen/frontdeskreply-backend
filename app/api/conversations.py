@@ -89,10 +89,19 @@ async def get_sent_messages(
 @router.get("/leads")
 async def get_lead_database(business_id: str):
     """
-    Unified lead database — merges contacts from both the old form pipeline
-    and the new live chat sessions. MUST be before /{conversation_id}.
+    Lead database — all plans get basic leads from their channels.
+    Enterprise gets unified cross-channel merge (chat + call + form + email in one view).
+    MUST be before /{conversation_id}.
     """
     db = get_db()
+
+    # Check plan tier for unified lead source gating
+    plan_res = db.table("subscription_plans").select("plan_tier").eq(
+        "business_id", business_id
+    ).eq("status", "active").execute()
+    plan_tier = plan_res.data[0].get("plan_tier", "starter") if plan_res.data else "starter"
+    is_enterprise = plan_tier == "enterprise"
+
     leads: dict = {}
 
     # ── 1. Pull contacts from the contacts table (includes chat visitors) ─
@@ -158,53 +167,52 @@ async def get_lead_database(business_id: str):
     except Exception:
         pass
 
-    # ── 2b. Enrich with call session data ──────────────────────────
-    try:
-        calls_res = db.table("call_sessions").select(
-            "id, caller_phone, caller_name, started_at, duration_seconds, caller_source"
-        ).eq("business_id", business_id).execute()
-        for c in (calls_res.data or []):
-            phone = (c.get("caller_phone") or "").strip()
-            if not phone:
-                continue
-            # Normalize phone for matching
-            clean_phone = phone.replace("+1", "").replace("+", "").replace("-", "").replace(" ", "").replace("(", "").replace(")", "")
-            # Find matching lead by phone
-            caller_source = c.get("caller_source") or None
-            matched = False
-            for key, lead in leads.items():
-                lead_phone = (lead.get("phone") or "").replace("+1", "").replace("+", "").replace("-", "").replace(" ", "").replace("(", "").replace(")", "")
-                if lead_phone and lead_phone == clean_phone:
-                    lead["call_count"] = lead.get("call_count", 0) + 1
-                    lead["call_session_ids"] = lead.get("call_session_ids", []) + [c["id"]]
-                    if caller_source and not lead.get("heard_about_us"):
-                        lead["heard_about_us"] = caller_source
-                    if not lead.get("source") or lead["source"] == "unknown":
-                        lead["source"] = "phone_call"
-                    elif lead["source"] != "phone_call":
-                        lead["source"] = "multi"
-                    matched = True
-                    break
-            if not matched:
-                key = phone
-                leads[key] = {
-                    "id": key,
-                    "name": c.get("caller_name") or "Caller",
-                    "email": None,
-                    "phone": phone,
-                    "first_contact": c.get("started_at") or "",
-                    "last_contact": c.get("started_at") or "",
-                    "message_count": 0,
-                    "source": "phone_call",
-                    "intents": [],
-                    "status": "new",
-                    "chat_session_ids": [],
-                    "call_count": 1,
-                    "call_session_ids": [c["id"]],
-                    "heard_about_us": caller_source,
-                }
-    except Exception:
-        pass
+    # ── 2b. Enrich with call session data (Enterprise: unified cross-channel) ──
+    if is_enterprise:
+        try:
+            calls_res = db.table("call_sessions").select(
+                "id, caller_phone, caller_name, started_at, duration_seconds, caller_source"
+            ).eq("business_id", business_id).execute()
+            for c in (calls_res.data or []):
+                phone = (c.get("caller_phone") or "").strip()
+                if not phone:
+                    continue
+                clean_phone = phone.replace("+1", "").replace("+", "").replace("-", "").replace(" ", "").replace("(", "").replace(")", "")
+                caller_source = c.get("caller_source") or None
+                matched = False
+                for key, lead in leads.items():
+                    lead_phone = (lead.get("phone") or "").replace("+1", "").replace("+", "").replace("-", "").replace(" ", "").replace("(", "").replace(")", "")
+                    if lead_phone and lead_phone == clean_phone:
+                        lead["call_count"] = lead.get("call_count", 0) + 1
+                        lead["call_session_ids"] = lead.get("call_session_ids", []) + [c["id"]]
+                        if caller_source and not lead.get("heard_about_us"):
+                            lead["heard_about_us"] = caller_source
+                        if not lead.get("source") or lead["source"] == "unknown":
+                            lead["source"] = "phone_call"
+                        elif lead["source"] != "phone_call":
+                            lead["source"] = "multi"
+                        matched = True
+                        break
+                if not matched:
+                    key = phone
+                    leads[key] = {
+                        "id": key,
+                        "name": c.get("caller_name") or "Caller",
+                        "email": None,
+                        "phone": phone,
+                        "first_contact": c.get("started_at") or "",
+                        "last_contact": c.get("started_at") or "",
+                        "message_count": 0,
+                        "source": "phone_call",
+                        "intents": [],
+                        "status": "new",
+                        "chat_session_ids": [],
+                        "call_count": 1,
+                        "call_session_ids": [c["id"]],
+                        "heard_about_us": caller_source,
+                    }
+        except Exception:
+            pass
 
     # ── 3. Also pull from inbound_messages for legacy form leads ─────
     try:

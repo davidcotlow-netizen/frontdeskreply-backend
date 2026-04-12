@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/voice", tags=["voice-provision"])
 
 
-def build_voice_prompt(config: dict) -> str:
+def build_voice_prompt(config: dict, plan_tier: str = "pro") -> str:
     """Build the Vela voice system prompt from business config + FAQs."""
     faqs = config.get("faqs", [])
     faq_text = "\n".join([f"Q: {f['question']}\nA: {f['answer']}" for f in faqs])
@@ -25,6 +25,10 @@ def build_voice_prompt(config: dict) -> str:
     phone = config.get("phone", "")
     city = config.get("city", "")
     tone = config.get("tone", "friendly and casual")
+
+    multi_lang = ""
+    if plan_tier in ("pro", "enterprise"):
+        multi_lang = "\n12. MULTI-LANGUAGE: If the caller speaks any language other than English, respond entirely in that language for the rest of the call."
 
     return f"""You are Vela, the phone assistant for {business_name}{f' in {city}' if city else ''}.
 
@@ -46,8 +50,7 @@ You MUST answer caller questions using ONLY the FAQ answers below. When a caller
 8. After answering, ask "Is there anything else I can help you with?"
 9. If they say goodbye, say a warm goodbye naturally.
 10. NAME PERSONALIZATION: Your opening asks for the caller's name. When they give it, say "Nice to meet you, [name]! Quick question — how did you hear about us?" After they answer, say "Thanks for letting me know! How can I help you today?" Use their name occasionally throughout.
-11. TRANSITION VARIETY: Rotate through different transitions before answering. Never use the same transition twice per call. Sometimes skip the transition entirely and just answer directly.
-12. MULTI-LANGUAGE: If the caller speaks any language other than English, respond entirely in that language for the rest of the call.
+11. TRANSITION VARIETY: Rotate through different transitions before answering. Never use the same transition twice per call. Sometimes skip the transition entirely and just answer directly.{multi_lang}
 
 BUSINESS INFO: {business_name}{f', {city}' if city else ''}{f', {phone}' if phone else ''}
 
