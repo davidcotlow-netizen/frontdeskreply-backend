@@ -41,10 +41,10 @@ class FAQUpdate(BaseModel):
 
 # ── Retell Voice AI sync ─────────────────────────────────────────────────────
 
-def _get_retell_llm_id(business_id: str) -> str | None:
+def _get_retell_config(business_id: str) -> dict | None:
     """
-    Look up the Retell LLM ID from the voice channel's config column.
-    This is the single source of truth for Retell ↔ business mapping.
+    Look up Retell IDs from the voice channel's config column.
+    Returns dict with retell_llm_id and retell_agent_id, or None.
     """
     db = get_db()
     res = db.table("channels").select("config").eq(
@@ -53,9 +53,8 @@ def _get_retell_llm_id(business_id: str) -> str | None:
 
     for ch in (res.data or []):
         config = ch.get("config") or {}
-        llm_id = config.get("retell_llm_id")
-        if llm_id:
-            return llm_id
+        if config.get("retell_llm_id"):
+            return config
 
     return None
 
@@ -63,10 +62,9 @@ def _get_retell_llm_id(business_id: str) -> str | None:
 def _sync_retell_prompt(business_id: str) -> dict:
     """
     Rebuild the voice prompt from current FAQs + business config and push
-    it to the Retell LLM so the phone AI always has the latest knowledge.
-    Returns a result dict with status, faq_count, and optional error.
+    it to the Retell LLM, then publish the agent so changes go live.
 
-    Source of truth for LLM ID: channels.config where channel_type='voice'.
+    Source of truth for IDs: channels.config where channel_type='voice'.
     """
     try:
         import httpx
@@ -78,9 +76,12 @@ def _sync_retell_prompt(business_id: str) -> dict:
         if not settings.retell_api_key:
             return {"status": "skipped", "reason": "no_api_key", "faq_count": 0}
 
-        llm_id = _get_retell_llm_id(business_id)
-        if not llm_id:
+        retell_config = _get_retell_config(business_id)
+        if not retell_config:
             return {"status": "skipped", "reason": "no_retell_llm", "faq_count": 0}
+
+        llm_id = retell_config["retell_llm_id"]
+        agent_id = retell_config.get("retell_agent_id")
 
         config = get_business_chat_config(business_id)
         if not config:
@@ -89,21 +90,22 @@ def _sync_retell_prompt(business_id: str) -> dict:
         faq_count = len(config.get("faqs", []))
         prompt = build_voice_prompt(config)
 
-        # Attempt sync with one retry on server errors
+        retell_headers = {
+            "Authorization": f"Bearer {settings.retell_api_key}",
+            "Content-Type": "application/json",
+        }
+
+        # Step 1: Update the LLM prompt
         for attempt in range(2):
             res = httpx.patch(
                 f"https://api.retellai.com/update-retell-llm/{llm_id}",
-                headers={
-                    "Authorization": f"Bearer {settings.retell_api_key}",
-                    "Content-Type": "application/json",
-                },
+                headers=retell_headers,
                 json={"general_prompt": prompt},
                 timeout=30,
             )
 
             if res.status_code == 200:
-                logger.info(f"Retell LLM {llm_id} synced with {faq_count} FAQs for business {business_id}")
-                return {"status": "synced", "faq_count": faq_count}
+                break
 
             # Retry once on 5xx
             if res.status_code >= 500 and attempt == 0:
@@ -112,6 +114,23 @@ def _sync_retell_prompt(business_id: str) -> dict:
 
             logger.error(f"Retell LLM sync failed ({res.status_code}): {res.text[:200]}")
             return {"status": "error", "reason": f"retell_api_{res.status_code}", "faq_count": faq_count}
+
+        # Step 2: Publish the agent so the updated LLM goes live
+        # Without this, Retell serves the old "published" version of the prompt.
+        if agent_id:
+            pub_res = httpx.post(
+                f"https://api.retellai.com/publish-agent/{agent_id}",
+                headers=retell_headers,
+                json={},
+                timeout=15,
+            )
+            if pub_res.status_code == 200:
+                logger.info(f"Retell agent {agent_id} published with {faq_count} FAQs")
+            else:
+                logger.warning(f"Retell agent publish returned {pub_res.status_code}: {pub_res.text[:100]}")
+
+        logger.info(f"Retell LLM {llm_id} synced with {faq_count} FAQs for business {business_id}")
+        return {"status": "synced", "faq_count": faq_count}
 
     except httpx.TimeoutException:
         logger.error(f"Retell sync timeout for business {business_id}")
