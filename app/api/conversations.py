@@ -1,8 +1,41 @@
-from fastapi import APIRouter, HTTPException
-from datetime import datetime, timezone
+from fastapi import APIRouter, HTTPException, Request
+from datetime import datetime, timezone, timedelta
 from app.core.database import get_db
+import hashlib
+import secrets
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
+
+
+def _score_lead(lead: dict) -> str:
+    """Score a lead as hot/warm/cold based on engagement signals."""
+    interactions = lead.get("message_count", 0) + lead.get("call_count", 0)
+    intents = [i.lower() for i in lead.get("intents", [])]
+    has_email = bool(lead.get("email"))
+    has_phone = bool(lead.get("phone"))
+
+    # Calculate days since last contact
+    days_since = 999
+    last = lead.get("last_contact", "")
+    if last:
+        try:
+            last_dt = datetime.fromisoformat(last.replace("Z", "+00:00"))
+            days_since = (datetime.now(timezone.utc) - last_dt).days
+        except Exception:
+            pass
+
+    booking_intents = {"booking", "booking_request", "quote", "quote_request", "schedule"}
+
+    # Hot: high engagement or booking intent or very recent
+    if interactions >= 3 or any(i in booking_intents for i in intents) or days_since <= 2:
+        return "hot"
+
+    # Warm: moderate engagement with contact info or recent
+    if (interactions >= 1 and has_email and has_phone) or days_since <= 7:
+        return "warm"
+
+    # Cold: everything else
+    return "cold"
 
 
 @router.get("")
@@ -86,6 +119,51 @@ async def get_sent_messages(
     return {"sent": result, "total": len(result)}
 
 
+@router.get("/leads/email-templates")
+async def get_email_templates(business_id: str):
+    """Pre-built email templates for lead follow-up. Growth+ only."""
+    db = get_db()
+    plan_res = db.table("subscription_plans").select("plan_tier").eq(
+        "business_id", business_id
+    ).eq("status", "active").execute()
+    tier = plan_res.data[0].get("plan_tier", "starter") if plan_res.data else "starter"
+    if tier not in ("growth", "pro", "enterprise"):
+        raise HTTPException(status_code=403, detail="Email templates require Growth+ plan")
+
+    biz = db.table("businesses").select("name, phone").eq("id", business_id).execute()
+    name = biz.data[0].get("name", "our team") if biz.data else "our team"
+    phone = biz.data[0].get("phone", "") if biz.data else ""
+
+    templates = [
+        {
+            "id": "follow_up",
+            "name": "Following Up",
+            "subject": f"Following up from {name}",
+            "body": f"Hi {{customer_name}},\n\nThank you for reaching out to {name}! I wanted to follow up and see if you had any additional questions or if there's anything else we can help with.\n\nWe'd love to assist you further. Feel free to reply to this email or call us at {phone}.\n\nBest regards,\n{name}",
+        },
+        {
+            "id": "thank_you_call",
+            "name": "Thank You for Calling",
+            "subject": f"Thanks for calling {name}!",
+            "body": f"Hi {{customer_name}},\n\nThank you for calling {name} today! It was great speaking with you.\n\nIf you have any follow-up questions or need anything else, don't hesitate to reach out. We're here to help!\n\nBest regards,\n{name}",
+        },
+        {
+            "id": "book_appointment",
+            "name": "Book Your Appointment",
+            "subject": f"Ready to book with {name}?",
+            "body": f"Hi {{customer_name}},\n\nWe'd love to get you on the schedule! Based on our conversation, it sounds like you're interested in learning more.\n\nYou can book your preferred time directly, or reply to this email and we'll get you set up.\n\nLooking forward to seeing you!\n\nBest regards,\n{name}",
+        },
+        {
+            "id": "re_engage",
+            "name": "We Miss You",
+            "subject": f"We'd love to hear from you again - {name}",
+            "body": f"Hi {{customer_name}},\n\nIt's been a little while since we last connected, and we wanted to check in! If you're still interested or have any new questions, we're here and ready to help.\n\nFeel free to reply to this email or give us a call at {phone}.\n\nHope to hear from you soon!\n\nBest regards,\n{name}",
+        },
+    ]
+
+    return {"templates": templates}
+
+
 @router.get("/leads")
 async def get_lead_database(business_id: str):
     """
@@ -101,6 +179,7 @@ async def get_lead_database(business_id: str):
     ).eq("status", "active").execute()
     plan_tier = plan_res.data[0].get("plan_tier", "starter") if plan_res.data else "starter"
     is_enterprise = plan_tier == "enterprise"
+    is_growth_plus = plan_tier in ("growth", "pro", "enterprise")
 
     leads: dict = {}
 
@@ -251,6 +330,7 @@ async def get_lead_database(business_id: str):
         lead.setdefault("call_count", 0)
         lead.setdefault("call_session_ids", [])
         lead.setdefault("heard_about_us", None)
+        lead["quality"] = _score_lead(lead) if is_growth_plus else None
         result.append({**lead, "top_intent": top})
 
     result.sort(key=lambda x: x["last_contact"], reverse=True)

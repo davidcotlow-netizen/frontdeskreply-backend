@@ -289,3 +289,133 @@ def send_escalation_notification(escalation_id: str):
             message_preview=escalation.get("reason", ""),
             reason=escalation.get("reason", "unknown"),
         )
+
+
+# ── Weekly Email Reports ────────────────────────────────────────────────────
+
+@celery_app.task
+def weekly_report_sweep():
+    """Find all Pro/Enterprise businesses and send weekly reports."""
+    db = get_db()
+    plans = db.table("subscription_plans").select("business_id, plan_tier").eq(
+        "status", "active"
+    ).execute()
+
+    sent = 0
+    for plan in (plans.data or []):
+        if plan.get("plan_tier") not in ("pro", "enterprise"):
+            continue
+        # Check if weekly report is enabled (default True)
+        prefs = db.table("notification_preferences").select("weekly_report_enabled").eq(
+            "business_id", plan["business_id"]
+        ).execute()
+        enabled = True
+        if prefs.data:
+            enabled = prefs.data[0].get("weekly_report_enabled", True)
+        if enabled:
+            send_weekly_report.delay(plan["business_id"])
+            sent += 1
+
+    logger.info(f"Weekly report sweep: dispatched {sent} reports")
+    return {"dispatched": sent}
+
+
+@celery_app.task
+def send_weekly_report(business_id: str):
+    """Generate and send a weekly performance digest email."""
+    from datetime import timedelta
+
+    db = get_db()
+
+    # Get business info
+    biz = db.table("businesses").select("name, owner_email, email, phone").eq("id", business_id).execute()
+    if not biz.data:
+        return
+    business = biz.data[0]
+    owner_email = business.get("owner_email") or business.get("email")
+    if not owner_email:
+        return
+
+    biz_name = business.get("name", "Your Business")
+    now = datetime.now(timezone.utc)
+    week_ago = (now - timedelta(days=7)).isoformat()
+
+    # Gather stats
+    chats = db.table("chat_sessions").select("id").eq("business_id", business_id).gte("started_at", week_ago).execute()
+    calls = db.table("call_sessions").select("id, duration_seconds").eq("business_id", business_id).gte("started_at", week_ago).execute()
+    contacts = db.table("contacts").select("id").eq("business_id", business_id).gte("first_seen_at", week_ago).execute()
+
+    total_chats = len(chats.data or [])
+    total_calls = len(calls.data or [])
+    total_minutes = sum(c.get("duration_seconds", 0) for c in (calls.data or [])) // 60
+    new_leads = len(contacts.data or [])
+
+    # Top questions (from chat messages)
+    from collections import Counter
+    msgs = db.table("chat_messages").select("content, role").eq("role", "visitor").execute()
+    questions = [m["content"][:80] for m in (msgs.data or []) if len(m.get("content", "")) > 10]
+    top_questions = [q for q, _ in Counter(questions).most_common(3)]
+
+    # Build HTML
+    html = f"""
+    <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#ffffff;">
+      <div style="background:#1a1f2e;padding:24px 28px;border-radius:12px 12px 0 0;">
+        <h1 style="color:#ffffff;margin:0;font-size:20px;">{biz_name} — Weekly Report</h1>
+        <p style="color:#94a3b8;margin:6px 0 0;font-size:13px;">Week of {(now - timedelta(days=7)).strftime('%b %d')} - {now.strftime('%b %d, %Y')}</p>
+      </div>
+      <div style="padding:24px 28px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 12px 12px;">
+        <div style="display:flex;gap:16px;margin-bottom:24px;">
+          <div style="flex:1;background:#f8fafc;border-radius:10px;padding:16px;text-align:center;">
+            <div style="font-size:28px;font-weight:700;color:#f97316;">{total_chats}</div>
+            <div style="font-size:12px;color:#64748b;margin-top:4px;">Chats</div>
+          </div>
+          <div style="flex:1;background:#f8fafc;border-radius:10px;padding:16px;text-align:center;">
+            <div style="font-size:28px;font-weight:700;color:#f97316;">{total_calls}</div>
+            <div style="font-size:12px;color:#64748b;margin-top:4px;">Calls</div>
+          </div>
+          <div style="flex:1;background:#f8fafc;border-radius:10px;padding:16px;text-align:center;">
+            <div style="font-size:28px;font-weight:700;color:#f97316;">{new_leads}</div>
+            <div style="font-size:12px;color:#64748b;margin-top:4px;">New Leads</div>
+          </div>
+          <div style="flex:1;background:#f8fafc;border-radius:10px;padding:16px;text-align:center;">
+            <div style="font-size:28px;font-weight:700;color:#f97316;">{total_minutes}</div>
+            <div style="font-size:12px;color:#64748b;margin-top:4px;">Call Min</div>
+          </div>
+        </div>
+        {"<h3 style='font-size:14px;color:#1a1f2e;margin:0 0 10px;'>Top Questions This Week</h3><ol style='margin:0;padding-left:18px;color:#475569;font-size:13px;line-height:1.8;'>" + "".join(f"<li>{q}</li>" for q in top_questions) + "</ol>" if top_questions else "<p style='color:#94a3b8;font-size:13px;'>No visitor questions this week.</p>"}
+        <div style="margin-top:24px;text-align:center;">
+          <a href="https://app.frontdeskreply.com/analytics" style="display:inline-block;padding:10px 24px;background:#f97316;color:#fff;border-radius:8px;text-decoration:none;font-weight:600;font-size:13px;">View Full Analytics</a>
+        </div>
+        <p style="margin-top:20px;font-size:11px;color:#94a3b8;text-align:center;">Powered by FrontDeskReply</p>
+      </div>
+    </div>
+    """
+
+    # Send via Resend
+    import httpx
+    try:
+        from app.core.config import get_settings
+        settings = get_settings()
+        resend_key = settings.resend_api_key
+    except Exception:
+        import os
+        resend_key = os.getenv("RESEND_API_KEY", "")
+
+    if not resend_key:
+        logger.error(f"Weekly report: no Resend API key for {business_id}")
+        return
+
+    res = httpx.post("https://api.resend.com/emails", headers={
+        "Authorization": f"Bearer {resend_key}",
+        "Content-Type": "application/json",
+    }, json={
+        "from": f"{biz_name} <hello@frontdeskreply.com>",
+        "to": [owner_email],
+        "subject": f"Your Weekly Report — {biz_name}",
+        "html": html,
+    }, timeout=15)
+
+    if res.status_code in (200, 201):
+        logger.info(f"Weekly report sent to {owner_email} for {biz_name}")
+    else:
+        logger.error(f"Weekly report send failed ({res.status_code}): {res.text[:200]}")

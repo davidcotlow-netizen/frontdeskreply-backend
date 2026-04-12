@@ -12,9 +12,50 @@ from app.core.database import get_db
 from app.core.config import get_settings
 from app.models.schemas import InboundFormPayload, InboundChatPayload, WebhookAck
 from app.workers.tasks import process_inbound_message
+import hashlib
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 logger = logging.getLogger(__name__)
+
+
+def validate_api_key(request: Request) -> str | None:
+    """
+    Validate an API key from the Authorization header.
+    Returns business_id if valid, None if no key provided.
+    Raises HTTPException if key is invalid or plan is not Enterprise.
+    """
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer fdr_"):
+        return None  # No API key — fall through to normal channel-based auth
+
+    token = auth.replace("Bearer ", "").strip()
+    key_hash = hashlib.sha256(token.encode()).hexdigest()
+
+    db = get_db()
+    res = db.table("api_keys").select("business_id, id").eq(
+        "key_hash", key_hash
+    ).eq("active", True).execute()
+
+    if not res.data:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+    key_row = res.data[0]
+    business_id = key_row["business_id"]
+
+    # Update last_used_at
+    db.table("api_keys").update({
+        "last_used_at": datetime.now(timezone.utc).isoformat()
+    }).eq("id", key_row["id"]).execute()
+
+    # Verify Enterprise plan
+    plan_res = db.table("subscription_plans").select("plan_tier").eq(
+        "business_id", business_id
+    ).eq("status", "active").execute()
+    tier = plan_res.data[0].get("plan_tier", "starter") if plan_res.data else "starter"
+    if tier != "enterprise":
+        raise HTTPException(status_code=403, detail="API access requires Enterprise plan")
+
+    return business_id
 
 
 def _find_or_create_contact(db, business_id: str, phone: str = None, email: str = None, sender_name: str = None) -> str:

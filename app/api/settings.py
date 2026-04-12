@@ -328,6 +328,36 @@ async def update_widget_branding(business_id: str, body: WidgetBrandingUpdate):
     return {"status": "updated", **meta}
 
 
+@router.patch("/widget-proactive")
+async def update_proactive_settings(business_id: str, body: dict):
+    """Update proactive chat trigger delay. Growth+ only."""
+    db = get_db()
+    plan_res = db.table("subscription_plans").select("plan_tier").eq(
+        "business_id", business_id
+    ).eq("status", "active").execute()
+    tier = plan_res.data[0].get("plan_tier", "starter") if plan_res.data else "starter"
+    if tier not in ("growth", "pro", "enterprise"):
+        raise HTTPException(status_code=403, detail="Proactive chat requires Growth+ plan")
+
+    delay = max(0, min(60, int(body.get("auto_open_delay", 0))))
+
+    biz = db.table("businesses").select("metadata").eq("id", business_id).execute()
+    meta = (biz.data[0].get("metadata") or {}) if biz.data else {}
+    meta["auto_open_delay"] = delay
+    db.table("businesses").update({"metadata": meta}).eq("id", business_id).execute()
+
+    return {"status": "updated", "auto_open_delay": delay}
+
+
+@router.get("/proactive-config")
+async def get_proactive_config(business_id: str):
+    """Get proactive chat settings."""
+    db = get_db()
+    biz = db.table("businesses").select("metadata").eq("id", business_id).execute()
+    meta = (biz.data[0].get("metadata") or {}) if biz.data else {}
+    return {"auto_open_delay": meta.get("auto_open_delay", 15)}
+
+
 @router.get("/widget-config")
 async def get_widget_config(business_id: str):
     """Public endpoint — widget.js calls this to get branding settings."""
@@ -344,7 +374,9 @@ async def get_widget_config(business_id: str):
     plan_res = db.table("subscription_plans").select("plan_tier").eq(
         "business_id", business_id
     ).eq("status", "active").maybe_single().execute()
-    is_pro = plan_res and plan_res.data and plan_res.data.get("plan_tier") == "pro"
+    tier = plan_res.data.get("plan_tier", "starter") if plan_res and plan_res.data else "starter"
+    is_pro = tier in ("pro", "enterprise")
+    is_growth_plus = tier in ("growth", "pro", "enterprise")
 
     return {
         "chatbot_name": meta.get("chatbot_name", "Vela"),
@@ -353,6 +385,7 @@ async def get_widget_config(business_id: str):
         "show_powered_by": False if (is_pro and meta.get("show_powered_by") == False) else True,
         "booking_url": meta.get("booking_url", "") if is_pro else "",
         "business_name": biz.data.get("name", ""),
+        "auto_open_delay": meta.get("auto_open_delay", 15) if is_growth_plus else 0,
     }
 
 
@@ -400,10 +433,11 @@ async def get_notification_prefs(business_id: str):
             "notify_on_chat": res.data.get("notify_on_chat", True),
             "notify_on_call": res.data.get("notify_on_call", True),
             "notify_on_sms": res.data.get("notify_on_sms", True),
+            "weekly_report_enabled": res.data.get("weekly_report_enabled", True),
         }
 
     # Defaults: all on
-    return {"notify_on_chat": True, "notify_on_call": True, "notify_on_sms": True}
+    return {"notify_on_chat": True, "notify_on_call": True, "notify_on_sms": True, "weekly_report_enabled": True}
 
 
 @router.patch("/notifications")
@@ -434,6 +468,12 @@ async def update_notification_prefs(business_id: str, body: dict):
         if plan_tier not in ("pro", "enterprise"):
             raise HTTPException(status_code=403, detail="SMS notifications require Pro plan")
         updates["notify_on_sms"] = bool(body["notify_on_sms"])
+
+    # Weekly reports: pro and enterprise only
+    if "weekly_report_enabled" in body:
+        if plan_tier not in ("pro", "enterprise"):
+            raise HTTPException(status_code=403, detail="Weekly reports require Pro plan")
+        updates["weekly_report_enabled"] = bool(body["weekly_report_enabled"])
 
     if not updates:
         return {"status": "no_changes"}
@@ -575,3 +615,73 @@ async def email_test(business_id: str):
     )
 
     return {"status": "sent", "to": owner_email}
+
+
+# ── API Keys (Enterprise) ──────────────────────────────────────────────────
+
+import hashlib
+import secrets as _secrets
+
+
+@router.get("/api-keys")
+async def list_api_keys(business_id: str):
+    """List API keys for a business (prefix only). Enterprise only."""
+    db = get_db()
+    plan_res = db.table("subscription_plans").select("plan_tier").eq(
+        "business_id", business_id
+    ).eq("status", "active").execute()
+    tier = plan_res.data[0].get("plan_tier", "starter") if plan_res.data else "starter"
+    if tier != "enterprise":
+        raise HTTPException(status_code=403, detail="API keys require Enterprise plan")
+
+    keys = db.table("api_keys").select(
+        "id, key_prefix, name, created_at, last_used_at, active"
+    ).eq("business_id", business_id).order("created_at", desc=True).execute()
+
+    return {"keys": keys.data or []}
+
+
+@router.post("/api-keys")
+async def create_api_key(business_id: str, body: dict = None):
+    """Generate a new API key. Enterprise only. Returns full key ONCE."""
+    db = get_db()
+    plan_res = db.table("subscription_plans").select("plan_tier").eq(
+        "business_id", business_id
+    ).eq("status", "active").execute()
+    tier = plan_res.data[0].get("plan_tier", "starter") if plan_res.data else "starter"
+    if tier != "enterprise":
+        raise HTTPException(status_code=403, detail="API keys require Enterprise plan")
+
+    key_name = (body or {}).get("name", "Default")
+    raw_key = "fdr_" + _secrets.token_hex(24)
+    key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
+    key_prefix = raw_key[:7] + "..." + raw_key[-4:]
+
+    res = db.table("api_keys").insert({
+        "business_id": business_id,
+        "key_hash": key_hash,
+        "key_prefix": key_prefix,
+        "name": key_name,
+        "active": True,
+    }).execute()
+
+    logger.info(f"API key created for business {business_id}: {key_prefix}")
+
+    return {
+        "status": "created",
+        "key": raw_key,
+        "key_prefix": key_prefix,
+        "id": res.data[0]["id"],
+        "warning": "This is the only time the full key will be shown. Copy it now.",
+    }
+
+
+@router.delete("/api-keys/{key_id}")
+async def revoke_api_key(key_id: str, business_id: str):
+    """Revoke (deactivate) an API key. Enterprise only."""
+    db = get_db()
+    db.table("api_keys").update({"active": False}).eq(
+        "id", key_id
+    ).eq("business_id", business_id).execute()
+    logger.info(f"API key revoked: {key_id} for business {business_id}")
+    return {"status": "revoked"}

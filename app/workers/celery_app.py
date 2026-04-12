@@ -1,4 +1,5 @@
 from celery import Celery
+from celery.schedules import crontab
 from app.core.config import get_settings
 
 settings = get_settings()
@@ -22,5 +23,13 @@ celery_app.conf.update(
     task_routes={
         "app.workers.tasks.process_inbound_message": {"queue": "messages"},
         "app.workers.tasks.send_escalation_notification": {"queue": "notifications"},
+        "app.workers.tasks.send_weekly_report": {"queue": "notifications"},
+        "app.workers.tasks.weekly_report_sweep": {"queue": "notifications"},
+    },
+    beat_schedule={
+        "weekly-email-reports": {
+            "task": "app.workers.tasks.weekly_report_sweep",
+            "schedule": crontab(hour=14, minute=0, day_of_week=1),  # Monday 9 AM CT (14:00 UTC)
+        },
     },
 )
