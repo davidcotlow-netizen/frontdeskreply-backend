@@ -451,3 +451,121 @@ async def update_notification_prefs(business_id: str, body: dict):
         db.table("notification_preferences").insert(updates).execute()
 
     return {"status": "updated", **updates}
+
+
+# ── Email Auto-Reply ───────────────────────────────────────────────────────
+
+ELIGIBLE_EMAIL_PLANS = ("growth", "pro", "enterprise")
+
+
+@router.get("/email-status")
+async def email_status(business_id: str):
+    """Check if email auto-reply is enabled for a business."""
+    db = get_db()
+    ch = db.table("channels").select("id, active, external_identifier").eq(
+        "business_id", business_id
+    ).eq("channel_type", "email").execute()
+
+    if ch.data:
+        row = ch.data[0]
+        return {
+            "enabled": row.get("active", False),
+            "forwarding_address": row.get("external_identifier", ""),
+        }
+
+    return {"enabled": False, "forwarding_address": ""}
+
+
+@router.post("/email-enable")
+async def email_enable(business_id: str):
+    """Enable email auto-reply. Creates an email channel. Growth+ only."""
+    db = get_db()
+
+    # Plan gate
+    plan_res = db.table("subscription_plans").select("plan_tier").eq(
+        "business_id", business_id
+    ).eq("status", "active").execute()
+    tier = plan_res.data[0].get("plan_tier", "starter") if plan_res.data else "starter"
+    if tier not in ELIGIBLE_EMAIL_PLANS:
+        raise HTTPException(status_code=403, detail="Email auto-reply requires Growth plan or above")
+
+    forwarding = f"leads-{business_id}@frontdeskreply.com"
+
+    # Check if channel already exists
+    existing = db.table("channels").select("id").eq(
+        "business_id", business_id
+    ).eq("channel_type", "email").execute()
+
+    if existing.data:
+        # Re-activate
+        db.table("channels").update({"active": True}).eq("id", existing.data[0]["id"]).execute()
+    else:
+        # Create new email channel
+        db.table("channels").insert({
+            "business_id": business_id,
+            "channel_type": "email",
+            "external_identifier": forwarding,
+            "provider": "resend",
+            "active": True,
+            "config": {},
+        }).execute()
+
+    logger.info(f"Email auto-reply enabled for business {business_id}: {forwarding}")
+    return {"status": "enabled", "forwarding_address": forwarding}
+
+
+@router.post("/email-disable")
+async def email_disable(business_id: str):
+    """Disable email auto-reply."""
+    db = get_db()
+    db.table("channels").update({"active": False}).eq(
+        "business_id", business_id
+    ).eq("channel_type", "email").execute()
+    logger.info(f"Email auto-reply disabled for business {business_id}")
+    return {"status": "disabled"}
+
+
+@router.post("/email-test")
+async def email_test(business_id: str):
+    """Send a test email so the business owner can see Vela's response."""
+    db = get_db()
+
+    # Get owner email
+    biz = db.table("businesses").select("owner_email, email, name").eq(
+        "id", business_id
+    ).execute()
+    if not biz.data:
+        raise HTTPException(status_code=404, detail="Business not found")
+
+    business = biz.data[0]
+    owner_email = business.get("owner_email") or business.get("email")
+    if not owner_email:
+        raise HTTPException(status_code=400, detail="No owner email configured. Add it in Business Profile first.")
+
+    # Generate a sample Vela response
+    from app.services.chat_service import get_business_chat_config
+    from app.services.chat_ai_service import get_chat_ai_service
+
+    config = get_business_chat_config(business_id)
+    ai = get_chat_ai_service()
+
+    test_question = "Hi, I'd like to know more about your services. What do you offer and how can I book?"
+    response = ""
+    async for chunk in ai.stream_chat_response(
+        business_config=config,
+        message_history=[],
+        visitor_message=test_question,
+    ):
+        response += chunk
+
+    # Send via email service
+    from app.services.email_service import send_email
+    result = send_email(
+        to_email=owner_email,
+        body=response,
+        subject=f"Test: Vela Email Auto-Reply for {business.get('name', 'your business')}",
+        customer_name="Test Customer",
+        business_id=business_id,
+    )
+
+    return {"status": "sent", "to": owner_email}
