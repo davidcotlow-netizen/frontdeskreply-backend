@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 from app.core.database import get_db
 from app.services.voice_service import create_call_session, add_call_transcript, end_call_session
 from app.services.notification_service import send_call_engagement_email
+from app.api.voice_ws import _extract_source
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,21 @@ def parse_transcript_string(transcript_str: str) -> list:
         elif line.startswith("User: "):
             entries.append({"role": "caller", "content": line[6:].strip()})
     return entries
+
+
+def extract_source_from_transcript(entries: list) -> str | None:
+    """
+    Scan transcript for the 'how did you hear about us?' exchange and extract
+    the caller's answer as a lead source.
+    """
+    for i, entry in enumerate(entries):
+        if entry["role"] == "milo":
+            text = entry["content"].lower()
+            if "hear about" in text or "find out about" in text or "find us" in text:
+                # The next caller entry is their answer
+                if i + 1 < len(entries) and entries[i + 1]["role"] == "caller":
+                    return _extract_source(entries[i + 1]["content"])
+    return None
 
 
 @router.post("/webhook")
@@ -136,6 +152,14 @@ async def save_retell_call(call_data: dict):
             }).execute()
 
         logger.info(f"Saved {len(entries)} transcript entries for call {call_id}")
+
+        # Extract lead source from transcript
+        caller_source = extract_source_from_transcript(entries)
+        if caller_source:
+            db.table("call_sessions").update({
+                "caller_source": caller_source,
+            }).eq("id", session_id).execute()
+            logger.info(f"Lead source extracted from webhook transcript: {caller_source}")
 
     # Send engagement email to business owner
     if business_id:

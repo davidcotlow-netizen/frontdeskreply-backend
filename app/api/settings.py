@@ -41,11 +41,11 @@ class FAQUpdate(BaseModel):
 
 # ── Retell Voice AI sync ─────────────────────────────────────────────────────
 
-def _sync_retell_prompt(business_id: str) -> None:
+def _sync_retell_prompt(business_id: str) -> dict:
     """
     Rebuild the voice prompt from current FAQs + business config and push
     it to the Retell LLM so the phone AI always has the latest knowledge.
-    Silently skips if the business has no Retell LLM provisioned.
+    Returns a result dict with status, faq_count, and optional error.
     """
     try:
         import httpx
@@ -55,19 +55,20 @@ def _sync_retell_prompt(business_id: str) -> None:
 
         settings = get_settings()
         if not settings.retell_api_key:
-            return
+            return {"status": "skipped", "reason": "no_api_key", "faq_count": 0}
 
         db = get_db()
         biz = db.table("businesses").select("metadata").eq("id", business_id).maybe_single().execute()
         meta = (biz.data.get("metadata") or {}) if biz and biz.data else {}
         llm_id = meta.get("retell_llm_id")
         if not llm_id:
-            return  # No Retell LLM provisioned for this business
+            return {"status": "skipped", "reason": "no_retell_llm", "faq_count": 0}
 
         config = get_business_chat_config(business_id)
         if not config:
-            return
+            return {"status": "error", "reason": "business_not_found", "faq_count": 0}
 
+        faq_count = len(config.get("faqs", []))
         prompt = build_voice_prompt(config)
 
         res = httpx.patch(
@@ -81,12 +82,15 @@ def _sync_retell_prompt(business_id: str) -> None:
         )
 
         if res.status_code == 200:
-            logger.info(f"Retell LLM {llm_id} synced with {len(config.get('faqs', []))} FAQs for business {business_id}")
+            logger.info(f"Retell LLM {llm_id} synced with {faq_count} FAQs for business {business_id}")
+            return {"status": "synced", "faq_count": faq_count}
         else:
             logger.error(f"Retell LLM sync failed ({res.status_code}): {res.text[:200]}")
+            return {"status": "error", "reason": f"retell_api_{res.status_code}", "faq_count": faq_count}
 
     except Exception as e:
         logger.error(f"Retell sync error for business {business_id}: {e}")
+        return {"status": "error", "reason": str(e), "faq_count": 0}
 
 
 # ── Business Profile ──────────────────────────────────────────────────────────
@@ -112,6 +116,15 @@ async def update_profile(business_id: str, body: BusinessProfileUpdate):
 
 # ── FAQs ──────────────────────────────────────────────────────────────────────
 
+@router.post("/faqs/sync-voice")
+async def sync_voice_faqs(business_id: str):
+    """Push current FAQs to Retell Voice AI. Returns sync status and FAQ count."""
+    result = _sync_retell_prompt(business_id)
+    if result["status"] == "error":
+        raise HTTPException(status_code=500, detail=result.get("reason", "Sync failed"))
+    return result
+
+
 @router.get("/faqs")
 async def get_faqs(business_id: str):
     db = get_db()
@@ -129,8 +142,8 @@ async def create_faq(business_id: str, body: FAQItem):
         "category": body.category or "general",
         "active": body.active,
     }).execute()
-    _sync_retell_prompt(business_id)
-    return {"status": "created", "faq": res.data[0]}
+    sync = _sync_retell_prompt(business_id)
+    return {"status": "created", "faq": res.data[0], "voice_sync": sync}
 
 
 @router.patch("/faqs/{faq_id}")
@@ -142,16 +155,16 @@ async def update_faq(faq_id: str, business_id: str, body: FAQItem):
         "category": body.category,
         "active": body.active,
     }).eq("id", faq_id).eq("business_id", business_id).execute()
-    _sync_retell_prompt(business_id)
-    return {"status": "updated"}
+    sync = _sync_retell_prompt(business_id)
+    return {"status": "updated", "voice_sync": sync}
 
 
 @router.delete("/faqs/{faq_id}")
 async def delete_faq(faq_id: str, business_id: str):
     db = get_db()
     db.table("faqs").delete().eq("id", faq_id).eq("business_id", business_id).execute()
-    _sync_retell_prompt(business_id)
-    return {"status": "deleted"}
+    sync = _sync_retell_prompt(business_id)
+    return {"status": "deleted", "voice_sync": sync}
 
 
 # ── Auto-Respond Toggle ───────────────────────────────────────────────────────

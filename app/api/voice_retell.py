@@ -26,6 +26,7 @@ from app.services.voice_service import (
 )
 from app.services.chat_service import get_business_chat_config
 from app.services.chat_ai_service import get_chat_ai_service
+from app.api.voice_ws import _extract_source
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +56,8 @@ async def voice_retell_ws(websocket: WebSocket, business_id: str):
     session_id = None
     call_start = time.time()
     response_id = 0
+    caller_source = None
+    source_extracted = False
 
     logger.info(f"Retell WS connected: business={business_id}")
 
@@ -107,6 +110,21 @@ async def voice_retell_ws(websocket: WebSocket, business_id: str):
                 # Save caller transcript
                 if session_id:
                     add_call_transcript(session_id=session_id, role="caller", content=last_utterance)
+
+                # Extract lead source from early conversation
+                # Retell prompt asks: "how did you hear about us?" as the 2nd exchange
+                # Check if a prior Vela message asked about source and this is the answer
+                if not source_extracted and not caller_source:
+                    # Look for "hear about" in the previous Vela message
+                    for entry in reversed(transcript[:-1]):
+                        if entry.get("role") == "agent":
+                            agent_text = entry.get("content", "").lower()
+                            if "hear about" in agent_text or "find out about" in agent_text or "find us" in agent_text:
+                                caller_source = _extract_source(last_utterance)
+                                source_extracted = True
+                                if caller_source:
+                                    logger.info(f"Retell caller source extracted: {caller_source}")
+                            break
 
                 # Build history from Retell transcript
                 conversation_history = []
@@ -194,5 +212,5 @@ async def voice_retell_ws(websocket: WebSocket, business_id: str):
     finally:
         duration = int(time.time() - call_start)
         if session_id:
-            end_call_session(session_id, duration_seconds=duration)
-        logger.info(f"Retell call ended: session={session_id} duration={duration}s")
+            end_call_session(session_id, duration_seconds=duration, caller_source=caller_source)
+        logger.info(f"Retell call ended: session={session_id} duration={duration}s source={caller_source}")
