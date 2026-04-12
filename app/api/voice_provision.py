@@ -207,21 +207,21 @@ async def provision_voice_ai(business_id: str):
         logger.error(f"Retell phone import error: {e}")
 
     # ── 9. Save to Supabase ──────────────────────────────────────
+    # Store Retell IDs in the voice channel's config column.
+    # This is the single source of truth for _sync_retell_prompt().
     db.table("channels").insert({
         "business_id": business_id,
         "channel_type": "voice",
-        "external_identifier": phone_number,
-    }).execute()
-
-    # Save Retell IDs to business metadata for future reference
-    db.table("businesses").update({
-        "metadata": {
+        "external_identifier": f"retell:{agent_id}",
+        "provider": "retell",
+        "active": True,
+        "config": {
             "retell_agent_id": agent_id,
             "retell_llm_id": llm_id,
             "voice_phone_number": phone_number,
             "voice_phone_sid": phone_sid,
-        }
-    }).eq("id", business_id).execute()
+        },
+    }).execute()
 
     logger.info(f"Voice AI provisioned for {business_name}: {phone_number}")
 

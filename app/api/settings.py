@@ -41,10 +41,23 @@ class FAQUpdate(BaseModel):
 
 # ── Retell Voice AI sync ─────────────────────────────────────────────────────
 
-# Known Retell agent → LLM mappings (avoids dependency on metadata column)
-_RETELL_LLM_MAP = {
-    "90d3ad7a-bac2-4a20-90ee-39f52db08669": "llm_a2f3d3abf38dd60e34515554b43c",  # Pawty Yoga
-}
+def _get_retell_llm_id(business_id: str) -> str | None:
+    """
+    Look up the Retell LLM ID from the voice channel's config column.
+    This is the single source of truth for Retell ↔ business mapping.
+    """
+    db = get_db()
+    res = db.table("channels").select("config").eq(
+        "business_id", business_id
+    ).eq("channel_type", "voice").execute()
+
+    for ch in (res.data or []):
+        config = ch.get("config") or {}
+        llm_id = config.get("retell_llm_id")
+        if llm_id:
+            return llm_id
+
+    return None
 
 
 def _sync_retell_prompt(business_id: str) -> dict:
@@ -52,6 +65,8 @@ def _sync_retell_prompt(business_id: str) -> dict:
     Rebuild the voice prompt from current FAQs + business config and push
     it to the Retell LLM so the phone AI always has the latest knowledge.
     Returns a result dict with status, faq_count, and optional error.
+
+    Source of truth for LLM ID: channels.config where channel_type='voice'.
     """
     try:
         import httpx
@@ -63,17 +78,7 @@ def _sync_retell_prompt(business_id: str) -> dict:
         if not settings.retell_api_key:
             return {"status": "skipped", "reason": "no_api_key", "faq_count": 0}
 
-        # Try to get LLM ID from known mappings first, then fall back to metadata column
-        llm_id = _RETELL_LLM_MAP.get(business_id)
-        if not llm_id:
-            db = get_db()
-            try:
-                biz = db.table("businesses").select("metadata").eq("id", business_id).execute()
-                meta = (biz.data[0].get("metadata") or {}) if biz.data else {}
-                llm_id = meta.get("retell_llm_id")
-            except Exception:
-                pass  # metadata column may not exist
-
+        llm_id = _get_retell_llm_id(business_id)
         if not llm_id:
             return {"status": "skipped", "reason": "no_retell_llm", "faq_count": 0}
 
@@ -84,23 +89,33 @@ def _sync_retell_prompt(business_id: str) -> dict:
         faq_count = len(config.get("faqs", []))
         prompt = build_voice_prompt(config)
 
-        res = httpx.patch(
-            f"https://api.retellai.com/update-retell-llm/{llm_id}",
-            headers={
-                "Authorization": f"Bearer {settings.retell_api_key}",
-                "Content-Type": "application/json",
-            },
-            json={"general_prompt": prompt},
-            timeout=15,
-        )
+        # Attempt sync with one retry on server errors
+        for attempt in range(2):
+            res = httpx.patch(
+                f"https://api.retellai.com/update-retell-llm/{llm_id}",
+                headers={
+                    "Authorization": f"Bearer {settings.retell_api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={"general_prompt": prompt},
+                timeout=30,
+            )
 
-        if res.status_code == 200:
-            logger.info(f"Retell LLM {llm_id} synced with {faq_count} FAQs for business {business_id}")
-            return {"status": "synced", "faq_count": faq_count}
-        else:
+            if res.status_code == 200:
+                logger.info(f"Retell LLM {llm_id} synced with {faq_count} FAQs for business {business_id}")
+                return {"status": "synced", "faq_count": faq_count}
+
+            # Retry once on 5xx
+            if res.status_code >= 500 and attempt == 0:
+                logger.warning(f"Retell API returned {res.status_code}, retrying...")
+                continue
+
             logger.error(f"Retell LLM sync failed ({res.status_code}): {res.text[:200]}")
             return {"status": "error", "reason": f"retell_api_{res.status_code}", "faq_count": faq_count}
 
+    except httpx.TimeoutException:
+        logger.error(f"Retell sync timeout for business {business_id}")
+        return {"status": "error", "reason": "timeout", "faq_count": 0}
     except Exception as e:
         logger.error(f"Retell sync error for business {business_id}: {e}")
         return {"status": "error", "reason": str(e), "faq_count": 0}
@@ -178,6 +193,37 @@ async def delete_faq(faq_id: str, business_id: str):
     db.table("faqs").delete().eq("id", faq_id).eq("business_id", business_id).execute()
     sync = _sync_retell_prompt(business_id)
     return {"status": "deleted", "voice_sync": sync}
+
+
+class BulkFAQImport(BaseModel):
+    faqs: List[FAQItem]
+    replace: bool = True  # True = delete existing FAQs first
+
+
+@router.post("/faqs/bulk")
+async def bulk_import_faqs(business_id: str, body: BulkFAQImport):
+    """
+    Bulk import FAQs — inserts all FAQs then syncs to Retell ONCE.
+    If replace=True (default), deletes existing FAQs first.
+    """
+    db = get_db()
+
+    if body.replace:
+        db.table("faqs").delete().eq("business_id", business_id).execute()
+
+    inserted = 0
+    for faq in body.faqs:
+        db.table("faqs").insert({
+            "business_id": business_id,
+            "question": faq.question,
+            "answer": faq.answer,
+            "category": faq.category or "general",
+            "active": faq.active,
+        }).execute()
+        inserted += 1
+
+    sync = _sync_retell_prompt(business_id)
+    return {"status": "imported", "faq_count": inserted, "voice_sync": sync}
 
 
 # ── Auto-Respond Toggle ───────────────────────────────────────────────────────

@@ -92,14 +92,16 @@ async def save_retell_call(call_data: dict):
     start_ts = call_data.get("start_timestamp")
     recording_url = call_data.get("recording_url") or ""
 
-    # Look up business by agent
-    # For now, map the known agent to Pawty Yoga
+    # Look up business by Retell agent ID from voice channel
     business_id = None
-    if agent_id == "agent_87ddc13524a76156ba11f73b6e":
-        business_id = "90d3ad7a-bac2-4a20-90ee-39f52db08669"
+    ch_res = db.table("channels").select("business_id").eq(
+        "channel_type", "voice"
+    ).eq("external_identifier", f"retell:{agent_id}").execute()
+    if ch_res.data:
+        business_id = ch_res.data[0]["business_id"]
 
     if not business_id:
-        logger.warning(f"Unknown agent: {agent_id}")
+        logger.warning(f"Unknown Retell agent: {agent_id} — no matching voice channel")
         return
 
     # Check if we already have this call
