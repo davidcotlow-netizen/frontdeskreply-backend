@@ -102,7 +102,22 @@ def _find_or_create_contact(
             "first_seen_at": datetime.now(timezone.utc).isoformat(),
             "last_seen_at": datetime.now(timezone.utc).isoformat(),
         }).execute()
-        return new_contact.data[0]["id"]
+        contact_id = new_contact.data[0]["id"]
+
+        # Fire outbound webhook for new lead
+        try:
+            from app.services.webhook_dispatcher import fire_webhook
+            fire_webhook(business_id, "lead.created", {
+                "contact_id": contact_id,
+                "name": name or "Chat Visitor",
+                "email": email,
+                "phone": phone,
+                "source": "live_chat",
+            })
+        except Exception:
+            pass  # Never block on webhook failure
+
+        return contact_id
     except Exception as e:
         logger.error(f"Failed to create contact for chat visitor: {e}")
         return None

@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 from app.core.database import get_db
 from app.services.voice_service import create_call_session, add_call_transcript, end_call_session
 from app.services.notification_service import send_call_engagement_email
+from app.services.webhook_dispatcher import fire_webhook
 from app.api.voice_ws import _extract_source
 
 logger = logging.getLogger(__name__)
@@ -169,6 +170,99 @@ async def save_retell_call(call_data: dict):
             send_call_engagement_email(business_id, session_id)
         except Exception as e:
             logger.error(f"Call engagement email failed: {e}")
+
+        # Fire outbound webhook
+        fire_webhook(business_id, "call.ended", {
+            "session_id": session_id,
+            "caller_phone": from_number,
+            "duration_seconds": duration_ms // 1000,
+            "call_status": call_status,
+            "caller_source": caller_source if 'caller_source' in dir() else None,
+        })
+
+
+@router.post("/dynamic-variables")
+async def retell_dynamic_variables(request: Request):
+    """
+    Retell calls this before each inbound call to get per-caller context.
+    We look up the caller's history and return variables injected into the prompt.
+    """
+    try:
+        data = await request.json()
+    except Exception:
+        return {"caller_history": ""}
+
+    from_number = data.get("from_number", "")
+    agent_id = data.get("agent_id", "")
+
+    if not from_number:
+        return {"caller_history": ""}
+
+    db = get_db()
+
+    # Find business from agent
+    business_id = None
+    ch_res = db.table("channels").select("business_id").eq(
+        "channel_type", "voice"
+    ).eq("external_identifier", f"retell:{agent_id}").execute()
+    if ch_res.data:
+        business_id = ch_res.data[0]["business_id"]
+
+    if not business_id:
+        return {"caller_history": ""}
+
+    # Look up caller by phone
+    clean = from_number.replace("+1", "").replace("+", "").replace("-", "").replace(" ", "").replace("(", "").replace(")", "")
+    contacts = db.table("contacts").select("name, first_seen_at").eq(
+        "business_id", business_id
+    ).execute()
+
+    caller_name = None
+    for c in (contacts.data or []):
+        cp = (c.get("phone") or "").replace("+1", "").replace("+", "").replace("-", "").replace(" ", "").replace("(", "").replace(")", "")
+        if cp and cp == clean:
+            caller_name = c.get("name")
+            break
+
+    # Get previous call sessions
+    calls = db.table("call_sessions").select(
+        "id, started_at, duration_seconds, caller_source"
+    ).eq("business_id", business_id).eq("caller_phone", from_number).order(
+        "started_at", desc=True
+    ).execute()
+
+    prev_calls = calls.data or []
+
+    if not prev_calls:
+        return {"caller_history": ""}
+
+    # Build caller history summary
+    lines = []
+    if caller_name and caller_name != "Caller":
+        lines.append(f"RETURNING CALLER: This person has called before. Their name is {caller_name}.")
+    else:
+        lines.append("RETURNING CALLER: This phone number has called before.")
+
+    lines.append(f"Previous calls: {len(prev_calls)}")
+
+    if prev_calls[0].get("caller_source"):
+        lines.append(f"How they heard about us: {prev_calls[0]['caller_source']}")
+
+    # Get last call transcript summary (most recent, up to 3 exchanges)
+    last_session_id = prev_calls[0]["id"]
+    transcripts = db.table("call_transcripts").select("role, content").eq(
+        "session_id", last_session_id
+    ).order("timestamp", desc=False).execute()
+
+    caller_msgs = [t["content"] for t in (transcripts.data or []) if t["role"] == "caller"]
+    if caller_msgs:
+        topics = "; ".join(caller_msgs[:3])
+        lines.append(f"Last call topics: {topics[:200]}")
+
+    history = "\n".join(lines)
+    logger.info(f"Returning caller context for {from_number}: {len(prev_calls)} previous calls")
+
+    return {"caller_history": history}
 
 
 @router.post("/sync")

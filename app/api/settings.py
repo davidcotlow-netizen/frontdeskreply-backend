@@ -617,6 +617,41 @@ async def email_test(business_id: str):
     return {"status": "sent", "to": owner_email}
 
 
+# ── Outbound Webhooks (Zapier/Make — Growth+) ──────────────────────────────
+
+@router.get("/webhooks-config")
+async def get_webhooks_config(business_id: str):
+    """Get outbound webhook URL for automation integrations."""
+    db = get_db()
+    biz = db.table("businesses").select("metadata").eq("id", business_id).execute()
+    meta = (biz.data[0].get("metadata") or {}) if biz.data else {}
+    return {
+        "webhook_url": meta.get("outbound_webhook_url", ""),
+        "events": ["call.ended", "chat.ended", "lead.created", "email.received"],
+    }
+
+
+@router.patch("/webhooks-config")
+async def update_webhooks_config(business_id: str, body: dict):
+    """Set outbound webhook URL for Zapier/Make. Growth+ only."""
+    db = get_db()
+    plan_res = db.table("subscription_plans").select("plan_tier").eq(
+        "business_id", business_id
+    ).eq("status", "active").execute()
+    tier = plan_res.data[0].get("plan_tier", "starter") if plan_res.data else "starter"
+    if tier not in ("growth", "pro", "enterprise"):
+        raise HTTPException(status_code=403, detail="Outbound webhooks require Growth+ plan")
+
+    webhook_url = body.get("webhook_url", "").strip()
+
+    biz = db.table("businesses").select("metadata").eq("id", business_id).execute()
+    meta = (biz.data[0].get("metadata") or {}) if biz.data else {}
+    meta["outbound_webhook_url"] = webhook_url
+    db.table("businesses").update({"metadata": meta}).eq("id", business_id).execute()
+
+    return {"status": "updated", "webhook_url": webhook_url}
+
+
 # ── API Keys (Enterprise) ──────────────────────────────────────────────────
 
 import hashlib
