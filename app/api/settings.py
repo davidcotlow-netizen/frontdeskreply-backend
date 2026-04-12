@@ -41,6 +41,12 @@ class FAQUpdate(BaseModel):
 
 # ── Retell Voice AI sync ─────────────────────────────────────────────────────
 
+# Known Retell agent → LLM mappings (avoids dependency on metadata column)
+_RETELL_LLM_MAP = {
+    "90d3ad7a-bac2-4a20-90ee-39f52db08669": "llm_a2f3d3abf38dd60e34515554b43c",  # Pawty Yoga
+}
+
+
 def _sync_retell_prompt(business_id: str) -> dict:
     """
     Rebuild the voice prompt from current FAQs + business config and push
@@ -57,10 +63,17 @@ def _sync_retell_prompt(business_id: str) -> dict:
         if not settings.retell_api_key:
             return {"status": "skipped", "reason": "no_api_key", "faq_count": 0}
 
-        db = get_db()
-        biz = db.table("businesses").select("metadata").eq("id", business_id).maybe_single().execute()
-        meta = (biz.data.get("metadata") or {}) if biz and biz.data else {}
-        llm_id = meta.get("retell_llm_id")
+        # Try to get LLM ID from known mappings first, then fall back to metadata column
+        llm_id = _RETELL_LLM_MAP.get(business_id)
+        if not llm_id:
+            db = get_db()
+            try:
+                biz = db.table("businesses").select("metadata").eq("id", business_id).execute()
+                meta = (biz.data[0].get("metadata") or {}) if biz.data else {}
+                llm_id = meta.get("retell_llm_id")
+            except Exception:
+                pass  # metadata column may not exist
+
         if not llm_id:
             return {"status": "skipped", "reason": "no_retell_llm", "faq_count": 0}
 
