@@ -65,6 +65,20 @@ FAQ KNOWLEDGE BASE:
 """
 
 
+# ── Pawty Yoga: per-business critical rules (mirror the phone/voice agent) ────
+# These are the SAME guardrails baked into Vela's Retell voice prompt (rules 17-19),
+# adapted for typed chat (links allowed). Appended ONLY for Pawty's business_id so
+# chat and phone answer consistently. Other tenants are unaffected.
+PAWTY_BUSINESS_ID = "90d3ad7a-bac2-4a20-90ee-39f52db08669"
+
+PAWTY_CRITICAL_RULES = """
+
+PAWTY YOGA — CRITICAL RULES (these match exactly what our phone assistant tells callers, so chat and phone stay consistent):
+A. EVENT DATES: Our FIRST event is Saturday, June 27, 2026 (four time slots: 9 AM, 11 AM, 1 PM, and 3 PM), followed by August 8th and 9th, 2026. If a visitor mentions a date you do NOT see in the FAQ, do NOT tell them it is wrong or does not exist — they may be looking at our live website, which is the source of truth. Confirm the dates you DO know and offer to have the team follow up to confirm anything you're unsure about. Never argue about dates.
+B. PRIVATE EVENTS: We host private events of all kinds — birthdays, bachelorettes, baby showers, corporate events, kids' parties, and more — and we bring the puppies to the guest's home, venue, or chosen space in the Houston area. Every private event is fully CUSTOM, so do NOT quote a price (there is no flat rate). If asked what's included: a certified instructor and beginner-friendly flow, socialized vet-checked puppies with dedicated handlers, puppy play and photo time, all mats and setup, and full teardown and sanitation. Never quote or estimate a price. Direct them to submit a private event inquiry at pawtyyoga.com (they can also email hello@pawtyyoga.com), and let them know the team will email a custom quote within 24 hours. Offer to take their email and a few quick details (event type, rough date, guest count, location) so the team can follow up.
+C. PAYMENTS: Checkout has two ways to pay — PayPal (which also covers Venmo, Pay Later, and debit/credit card) and a separate "Debit/Credit Card" option processed through Square. If a visitor says a payment isn't going through, reassure them and suggest trying the OTHER option (if PayPal fails, use the Debit/Credit Card option below it, and vice versa). Never tell them their payment problem can't be solved. All tickets are sold securely through Ticket Tailor, a reputable ticketing provider, and can be purchased on the main page of pawtyyoga.com."""
+
+
 # ── Chat AI class ────────────────────────────────────────────────────────────
 
 class ChatAIService:
@@ -91,7 +105,7 @@ class ChatAIService:
         if plan_tier in ("pro", "enterprise"):
             multi_lang = "10. MULTI-LANGUAGE (CRITICAL): If the visitor writes ANY language other than English, you MUST respond ENTIRELY in that language for the rest of the conversation. Do NOT mix languages. Translate your FAQ answers into their language. Every single word must be in their language."
 
-        return CHAT_SYSTEM_PROMPT.format(
+        prompt = CHAT_SYSTEM_PROMPT.format(
             business_name=config.get("name", "our business"),
             business_type=config.get("type", "service business"),
             city=config.get("city", ""),
@@ -102,6 +116,12 @@ class ChatAIService:
             faq_block=faq_block,
             multi_language_rule=multi_lang,
         )
+
+        # Per-business guardrails so chat mirrors the phone/voice agent (Pawty only).
+        if config.get("business_id") == PAWTY_BUSINESS_ID:
+            prompt += PAWTY_CRITICAL_RULES
+
+        return prompt
 
     def _build_messages(self, message_history: list, visitor_message: str) -> list:
         """Convert chat history + new message into Claude messages format."""

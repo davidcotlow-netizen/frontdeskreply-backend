@@ -135,6 +135,42 @@ def _sync_retell_prompt(business_id: str) -> dict:
             else:
                 logger.warning(f"Retell agent publish returned {pub_res.status_code}: {pub_res.text[:100]}")
 
+            # Step 3: Re-point the inbound phone number(s) to the newest published
+            # agent version. Retell phone numbers PIN a specific inbound_agent_version,
+            # so publishing alone does NOT reach live calls — the number stays on its
+            # old version until moved. (This gap caused stale prompts to keep serving.)
+            try:
+                agents = httpx.get(
+                    "https://api.retellai.com/list-agents",
+                    headers=retell_headers, timeout=15,
+                ).json()
+                pub_versions = [
+                    a.get("version") for a in agents
+                    if a.get("agent_id") == agent_id and a.get("is_published")
+                    and isinstance(a.get("version"), int)
+                ]
+                newest = max(pub_versions) if pub_versions else None
+                if newest is not None:
+                    numbers = httpx.get(
+                        "https://api.retellai.com/list-phone-numbers",
+                        headers=retell_headers, timeout=15,
+                    ).json()
+                    for n in numbers:
+                        if n.get("inbound_agent_id") == agent_id and n.get("inbound_agent_version") != newest:
+                            num = n.get("phone_number")
+                            up = httpx.patch(
+                                f"https://api.retellai.com/update-phone-number/{num}",
+                                headers=retell_headers,
+                                json={"inbound_agent_id": agent_id, "inbound_agent_version": newest},
+                                timeout=15,
+                            )
+                            if up.status_code == 200:
+                                logger.info(f"Repointed {num} inbound_agent_version -> {newest}")
+                            else:
+                                logger.warning(f"Repoint {num} returned {up.status_code}: {up.text[:100]}")
+            except Exception as e:
+                logger.warning(f"Phone re-point step failed (non-fatal): {e}")
+
         logger.info(f"Retell LLM {llm_id} synced with {faq_count} FAQs for business {business_id}")
         return {"status": "synced", "faq_count": faq_count}
 
