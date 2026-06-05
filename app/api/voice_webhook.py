@@ -9,6 +9,7 @@ import re
 from fastapi import APIRouter, Request, Response
 from fastapi.responses import PlainTextResponse
 
+from app.core.database import get_db
 from app.services.voice_service import (
     get_business_by_twilio_number,
     check_business_voice_eligible,
@@ -36,6 +37,95 @@ def strip_emojis(text: str) -> str:
     return text.replace("**", "").replace("*", "").replace("#", "").replace("_", "").strip()
 
 
+# \u2500\u2500 Spam-call rejection \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+# Block list lives in `blocked_numbers` (see migration 014). Numbers stored
+# E.164. Per-call cost is one indexed Supabase select; rejection happens
+# before any AI / Gather is fired, so blocked callers cost effectively
+# zero (Twilio drops the call at the carrier handshake).
+
+def normalize_phone_e164(phone: str) -> str:
+    """Normalize a US phone number to E.164 (+1XXXXXXXXXX).
+
+    Twilio's `From` arrives in E.164 most of the time, but local-format
+    fallbacks happen on some carriers; manually-seeded blocklist rows may
+    also be loose. We pass-through anything already prefixed `+`, and
+    apply `+1` to 10-digit US numbers.
+    """
+    if not phone:
+        return ""
+    if phone.startswith("+"):
+        return phone
+    digits = re.sub(r"\D", "", phone)
+    if len(digits) == 11 and digits.startswith("1"):
+        return "+" + digits
+    if len(digits) == 10:
+        return "+1" + digits
+    return phone
+
+
+def is_caller_blocked(business_id: str, from_number: str) -> bool:
+    """Check `blocked_numbers` for an exact OR prefix match.
+
+    Falls open (returns False) on any DB error so a transient outage
+    doesn't take legitimate calls offline \u2014 worst case is a few spam
+    calls slip through until the DB recovers.
+    """
+    if not from_number or not business_id:
+        return False
+    e164 = normalize_phone_e164(from_number)
+    if not e164:
+        return False
+    try:
+        db = get_db()
+        res = (
+            db.table("blocked_numbers")
+              .select("phone_number, match_type, reason")
+              .eq("business_id", business_id)
+              .execute()
+        )
+        for row in (res.data or []):
+            stored = row.get("phone_number") or ""
+            mtype = row.get("match_type") or "exact"
+            if mtype == "exact" and stored == e164:
+                logger.warning(
+                    f"voice_blocked_exact: caller={e164} business={business_id} "
+                    f"reason={row.get('reason') or ''}"
+                )
+                return True
+            if mtype == "prefix" and stored and e164.startswith(stored):
+                logger.warning(
+                    f"voice_blocked_prefix: caller={e164} matched={stored} "
+                    f"business={business_id} reason={row.get('reason') or ''}"
+                )
+                return True
+    except Exception:
+        logger.exception("blocked_numbers_lookup_failed")
+        return False
+    return False
+
+
+def _get_retell_voice_agent(business_id: str) -> str | None:
+    """Return the business's Retell voice agent_id if it uses Retell for voice.
+
+    When present, inbound calls (that survive the spam blocklist) are bridged
+    straight to Retell over SIP — so the call passes through our blocklist
+    FIRST, then reaches the exact same Vela agent as before. Falls open
+    (returns None -> legacy Gather flow) on any DB error.
+    """
+    try:
+        db = get_db()
+        res = db.table("channels").select("config").eq(
+            "business_id", business_id
+        ).eq("channel_type", "voice").execute()
+        for ch in (res.data or []):
+            cfg = ch.get("config") or {}
+            if cfg.get("retell_agent_id"):
+                return cfg["retell_agent_id"]
+    except Exception:
+        logger.exception("retell_voice_agent_lookup_failed")
+    return None
+
+
 @router.post("/inbound")
 async def inbound_call(request: Request):
     form = await request.form()
@@ -52,8 +142,35 @@ async def inbound_call(request: Request):
 
     business_id = business["business_id"]
 
+    # Spam-call rejection. <Reject/> drops the call at the Twilio carrier
+    # layer — no Gather, no Say, no AI prompt fires. The caller hears a
+    # standard rejection signal and we pay $0 in Anthropic/TTS/per-second
+    # voice charges. See migration 014 for the blocked_numbers table.
+    if is_caller_blocked(business_id, from_number):
+        logger.warning(
+            f"call_rejected_blocked: from={from_number} to={to_number} "
+            f"sid={call_sid} business={business_id}"
+        )
+        twiml = '<?xml version="1.0" encoding="UTF-8"?><Response><Reject reason="rejected"/></Response>'
+        return Response(content=twiml, media_type="application/xml")
+
     if not check_business_voice_eligible(business_id):
         twiml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="{VOICE}">Thank you for calling. Please visit our website for more information. Goodbye.</Say><Hangup/></Response>'
+        return Response(content=twiml, media_type="application/xml")
+
+    # Retell-powered businesses: the call already cleared the spam blocklist
+    # above, so bridge it to the same Retell agent over SIP. answerOnBridge
+    # keeps the caller hearing ringback until Retell picks up; callerId passes
+    # the ORIGINAL caller number through so caller-ID / notifications stay intact.
+    retell_agent = _get_retell_voice_agent(business_id)
+    if retell_agent:
+        sip_uri = f"sip:{to_number}@sip.retellai.com"
+        logger.info(f"voice_bridge_retell: from={from_number} to={to_number} agent={retell_agent} sip={sip_uri}")
+        twiml = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            f'<Response><Dial answerOnBridge="true" callerId="{escape_xml(from_number)}" timeout="20">'
+            f'<Sip>{escape_xml(sip_uri)}</Sip></Dial></Response>'
+        )
         return Response(content=twiml, media_type="application/xml")
 
     config = get_business_chat_config(business_id)
