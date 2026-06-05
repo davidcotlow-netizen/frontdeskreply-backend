@@ -5,6 +5,7 @@ Mirrors chat_service.py patterns for consistency.
 """
 
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -122,13 +123,21 @@ def get_business_by_twilio_number(phone_number: str) -> Optional[dict]:
     if res and res.data:
         return res.data
 
-    # Fallback: check businesses table directly for phone match
-    clean = phone_number.replace("+1", "").replace("+", "").replace("-", "").replace(" ", "").replace("(", "").replace(")", "")
-    res = db.table("businesses").select("id, name").execute()
-    for biz in (res.data or []):
-        biz_phone = (biz.get("phone") or "").replace("+1", "").replace("+", "").replace("-", "").replace(" ", "").replace("(", "").replace(")", "")
-        if biz_phone and biz_phone == clean:
-            return {"business_id": biz["id"]}
+    # Fallback: check businesses table directly for phone match.
+    # NOTE: must select `phone` (previously selected only id,name then matched
+    # on a never-fetched phone -> always failed). This fallback is the primary
+    # resolver when the channels table isn't readable for this client.
+    def _digits(p: str) -> str:
+        return re.sub(r"\D", "", p or "").lstrip("1")  # strip US country code
+
+    clean = _digits(phone_number)
+    res = db.table("businesses").select("id, name, phone, active").execute()
+    matches = [b for b in (res.data or []) if clean and _digits(b.get("phone")) == clean]
+    if matches:
+        # Prefer an active business if multiple share a number (stale duplicates).
+        active = [b for b in matches if b.get("active")]
+        chosen = (active or matches)[0]
+        return {"business_id": chosen["id"]}
 
     return None
 
