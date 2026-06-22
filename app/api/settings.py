@@ -123,21 +123,39 @@ def _sync_retell_prompt(business_id: str) -> dict:
 
         # Step 2: Publish the agent so the updated LLM goes live
         # Without this, Retell serves the old "published" version of the prompt.
+        # The publish endpoint now requires the explicit version to publish
+        # (the legacy empty-body /publish-agent is deprecated), so we look up the
+        # agent's latest version — the draft holding the LLM update — and publish it.
         if agent_id:
-            pub_res = httpx.post(
-                f"https://api.retellai.com/publish-agent/{agent_id}",
-                headers=retell_headers,
-                json={},
-                timeout=15,
-            )
-            if pub_res.status_code == 200:
-                logger.info(f"Retell agent {agent_id} published with {faq_count} FAQs")
-            else:
-                logger.warning(f"Retell agent publish returned {pub_res.status_code}: {pub_res.text[:100]}")
+            target_version = None
+            try:
+                agents = httpx.get(
+                    "https://api.retellai.com/list-agents",
+                    headers=retell_headers, timeout=15,
+                ).json()
+                all_versions = [
+                    a.get("version") for a in agents
+                    if a.get("agent_id") == agent_id and isinstance(a.get("version"), int)
+                ]
+                target_version = max(all_versions) if all_versions else None
+            except Exception as e:
+                logger.warning(f"Could not determine agent version to publish (non-fatal): {e}")
+
+            if target_version is not None:
+                pub_res = httpx.post(
+                    f"https://api.retellai.com/publish-agent-version/{agent_id}",
+                    headers=retell_headers,
+                    json={"version": target_version},
+                    timeout=15,
+                )
+                if pub_res.status_code == 200:
+                    logger.info(f"Retell agent {agent_id} v{target_version} published with {faq_count} FAQs")
+                else:
+                    logger.warning(f"Retell agent publish returned {pub_res.status_code}: {pub_res.text[:100]}")
 
             # Step 3: Re-point the inbound phone number(s) to the newest published
-            # agent version. Retell phone numbers PIN a specific inbound_agent_version,
-            # so publishing alone does NOT reach live calls — the number stays on its
+            # agent version. Retell phone numbers PIN a specific agent version, so
+            # publishing alone does NOT reach live calls — the number stays on its
             # old version until moved. (This gap caused stale prompts to keep serving.)
             try:
                 agents = httpx.get(
@@ -156,16 +174,28 @@ def _sync_retell_prompt(business_id: str) -> dict:
                         headers=retell_headers, timeout=15,
                     ).json()
                     for n in numbers:
-                        if n.get("inbound_agent_id") == agent_id and n.get("inbound_agent_version") != newest:
+                        # Read the current inbound binding from the new inbound_agents
+                        # list, falling back to the legacy single-agent fields.
+                        inbound = n.get("inbound_agents")
+                        if inbound:
+                            match = next((a for a in inbound if a.get("agent_id") == agent_id), None)
+                            bound = match is not None
+                            cur_version = match.get("agent_version") if match else None
+                        else:
+                            bound = n.get("inbound_agent_id") == agent_id
+                            cur_version = n.get("inbound_agent_version")
+                        if bound and cur_version != newest:
                             num = n.get("phone_number")
                             up = httpx.patch(
                                 f"https://api.retellai.com/update-phone-number/{num}",
                                 headers=retell_headers,
-                                json={"inbound_agent_id": agent_id, "inbound_agent_version": newest},
+                                json={"inbound_agents": [
+                                    {"agent_id": agent_id, "agent_version": newest, "weight": 1}
+                                ]},
                                 timeout=15,
                             )
                             if up.status_code == 200:
-                                logger.info(f"Repointed {num} inbound_agent_version -> {newest}")
+                                logger.info(f"Repointed {num} inbound agent version -> {newest}")
                             else:
                                 logger.warning(f"Repoint {num} returned {up.status_code}: {up.text[:100]}")
             except Exception as e:

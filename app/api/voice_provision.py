@@ -199,7 +199,7 @@ async def provision_voice_ai(business_id: str):
         import_res = httpx.post("https://api.retellai.com/import-phone-number", headers=retell_headers, json={
             "phone_number": phone_number,
             "termination_uri": "frontdeskreply.pstn.twilio.com",
-            "inbound_agent_id": agent_id,
+            "inbound_agents": [{"agent_id": agent_id, "weight": 1}],
         }, timeout=15)
 
         if import_res.status_code != 201:
