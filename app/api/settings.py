@@ -101,7 +101,46 @@ def _sync_retell_prompt(business_id: str) -> dict:
             "Content-Type": "application/json",
         }
 
-        # Step 1: Update the LLM prompt
+        # Step 0: Prepare an editable draft version.
+        # Two Retell API changes are handled here:
+        #  (a) A PUBLISHED LLM version is immutable — patching it returns
+        #      400 "Cannot update published LLM". So if the current head is
+        #      published we first fork a new draft agent version (which forks an
+        #      editable LLM version) off the head. base_version is REQUIRED.
+        #  (b) GET /list-agents is deprecated (removed 2026-07-31). We read the
+        #      head version from GET /get-agent/{id} and the new draft version
+        #      straight from the create-agent-version response — no enumeration.
+        target_version = None
+        if agent_id:
+            try:
+                ga = httpx.get(
+                    f"https://api.retellai.com/get-agent/{agent_id}",
+                    headers=retell_headers, timeout=15,
+                ).json()
+                head_version = ga.get("version")
+                llm_state = httpx.get(
+                    f"https://api.retellai.com/get-retell-llm/{llm_id}",
+                    headers=retell_headers, timeout=15,
+                ).json()
+                if llm_state.get("is_published") and isinstance(head_version, int):
+                    cv = httpx.post(
+                        f"https://api.retellai.com/create-agent-version/{agent_id}",
+                        headers=retell_headers,
+                        json={"base_version": head_version},
+                        timeout=20,
+                    )
+                    if cv.status_code in (200, 201):
+                        target_version = cv.json().get("version")
+                        logger.info(f"Forked draft agent version {target_version} off v{head_version}")
+                    else:
+                        logger.warning(f"create-agent-version returned {cv.status_code}: {cv.text[:120]}")
+                        target_version = head_version
+                else:
+                    target_version = head_version
+            except Exception as e:
+                logger.warning(f"Could not prepare draft agent version (non-fatal): {e}")
+
+        # Step 1: Update the LLM prompt (editable now that we forked a draft above)
         for attempt in range(2):
             res = httpx.patch(
                 f"https://api.retellai.com/update-retell-llm/{llm_id}",
@@ -121,83 +160,54 @@ def _sync_retell_prompt(business_id: str) -> dict:
             logger.error(f"Retell LLM sync failed ({res.status_code}): {res.text[:200]}")
             return {"status": "error", "reason": f"retell_api_{res.status_code}", "faq_count": faq_count}
 
-        # Step 2: Publish the agent so the updated LLM goes live
+        # Step 2: Publish the draft version so the updated LLM goes live.
         # Without this, Retell serves the old "published" version of the prompt.
-        # The publish endpoint now requires the explicit version to publish
-        # (the legacy empty-body /publish-agent is deprecated), so we look up the
-        # agent's latest version — the draft holding the LLM update — and publish it.
-        if agent_id:
-            target_version = None
-            try:
-                agents = httpx.get(
-                    "https://api.retellai.com/list-agents",
-                    headers=retell_headers, timeout=15,
-                ).json()
-                all_versions = [
-                    a.get("version") for a in agents
-                    if a.get("agent_id") == agent_id and isinstance(a.get("version"), int)
-                ]
-                target_version = max(all_versions) if all_versions else None
-            except Exception as e:
-                logger.warning(f"Could not determine agent version to publish (non-fatal): {e}")
+        if agent_id and target_version is not None:
+            pub_res = httpx.post(
+                f"https://api.retellai.com/publish-agent-version/{agent_id}",
+                headers=retell_headers,
+                json={"version": target_version},
+                timeout=15,
+            )
+            if pub_res.status_code == 200:
+                logger.info(f"Retell agent {agent_id} v{target_version} published with {faq_count} FAQs")
+            else:
+                logger.warning(f"Retell agent publish returned {pub_res.status_code}: {pub_res.text[:100]}")
 
-            if target_version is not None:
-                pub_res = httpx.post(
-                    f"https://api.retellai.com/publish-agent-version/{agent_id}",
-                    headers=retell_headers,
-                    json={"version": target_version},
-                    timeout=15,
-                )
-                if pub_res.status_code == 200:
-                    logger.info(f"Retell agent {agent_id} v{target_version} published with {faq_count} FAQs")
-                else:
-                    logger.warning(f"Retell agent publish returned {pub_res.status_code}: {pub_res.text[:100]}")
-
-            # Step 3: Re-point the inbound phone number(s) to the newest published
-            # agent version. Retell phone numbers PIN a specific agent version, so
+            # Step 3: Re-point the inbound phone number(s) to the version we just
+            # published. Retell phone numbers PIN a specific agent version, so
             # publishing alone does NOT reach live calls — the number stays on its
-            # old version until moved. (This gap caused stale prompts to keep serving.)
+            # old version until moved. (list-phone-numbers is not deprecated.)
             try:
-                agents = httpx.get(
-                    "https://api.retellai.com/list-agents",
+                numbers = httpx.get(
+                    "https://api.retellai.com/list-phone-numbers",
                     headers=retell_headers, timeout=15,
                 ).json()
-                pub_versions = [
-                    a.get("version") for a in agents
-                    if a.get("agent_id") == agent_id and a.get("is_published")
-                    and isinstance(a.get("version"), int)
-                ]
-                newest = max(pub_versions) if pub_versions else None
-                if newest is not None:
-                    numbers = httpx.get(
-                        "https://api.retellai.com/list-phone-numbers",
-                        headers=retell_headers, timeout=15,
-                    ).json()
-                    for n in numbers:
-                        # Read the current inbound binding from the new inbound_agents
-                        # list, falling back to the legacy single-agent fields.
-                        inbound = n.get("inbound_agents")
-                        if inbound:
-                            match = next((a for a in inbound if a.get("agent_id") == agent_id), None)
-                            bound = match is not None
-                            cur_version = match.get("agent_version") if match else None
+                for n in numbers:
+                    # Read the current inbound binding from the new inbound_agents
+                    # list, falling back to the legacy single-agent fields.
+                    inbound = n.get("inbound_agents")
+                    if inbound:
+                        match = next((a for a in inbound if a.get("agent_id") == agent_id), None)
+                        bound = match is not None
+                        cur_version = match.get("agent_version") if match else None
+                    else:
+                        bound = n.get("inbound_agent_id") == agent_id
+                        cur_version = n.get("inbound_agent_version")
+                    if bound and cur_version != target_version:
+                        num = n.get("phone_number")
+                        up = httpx.patch(
+                            f"https://api.retellai.com/update-phone-number/{num}",
+                            headers=retell_headers,
+                            json={"inbound_agents": [
+                                {"agent_id": agent_id, "agent_version": target_version, "weight": 1}
+                            ]},
+                            timeout=15,
+                        )
+                        if up.status_code == 200:
+                            logger.info(f"Repointed {num} inbound agent version -> {target_version}")
                         else:
-                            bound = n.get("inbound_agent_id") == agent_id
-                            cur_version = n.get("inbound_agent_version")
-                        if bound and cur_version != newest:
-                            num = n.get("phone_number")
-                            up = httpx.patch(
-                                f"https://api.retellai.com/update-phone-number/{num}",
-                                headers=retell_headers,
-                                json={"inbound_agents": [
-                                    {"agent_id": agent_id, "agent_version": newest, "weight": 1}
-                                ]},
-                                timeout=15,
-                            )
-                            if up.status_code == 200:
-                                logger.info(f"Repointed {num} inbound agent version -> {newest}")
-                            else:
-                                logger.warning(f"Repoint {num} returned {up.status_code}: {up.text[:100]}")
+                            logger.warning(f"Repoint {num} returned {up.status_code}: {up.text[:100]}")
             except Exception as e:
                 logger.warning(f"Phone re-point step failed (non-fatal): {e}")
 
