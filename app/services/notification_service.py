@@ -39,7 +39,36 @@ SOLICITATION_PHRASES = (
     "rank your website",
     "yelp advertising",
     "we can get you more leads",
+    # exact robocall openers. "this is business listing" is safe because a real
+    # caller says "I saw your business listing", never "this is business listing"
+    "this is business listing",
+    "customers cannot find your business",
+    "press one to verify",
+    "press 1 to verify",
 )
+
+# Known robocall scripts, normalised. Many of these calls last 2-4 seconds and
+# cut off mid-sentence ("This is business listing" and nothing more), so phrase
+# matching alone misses them. If everything the caller said is a PREFIX of a
+# known script, it is the same robocall caught early. Prefix matching is
+# naturally safe: a real "Hello, this is Sarah calling about a party" diverges
+# from the script at "Sarah" and never matches.
+SOLICITATION_SCRIPTS = (
+    "hello this is business listing verification with an urgent message we are "
+    "calling you because your business is not verified on google voice search "
+    "customers cannot find your business please press one to verify your business",
+)
+
+# below this many characters a prefix is too generic to judge ("hello this is")
+_MIN_SCRIPT_PREFIX = 20
+
+
+def _normalise(text: str) -> str:
+    """lowercase, strip punctuation, collapse whitespace"""
+    out = []
+    for ch in text.lower():
+        out.append(ch if (ch.isalnum() or ch.isspace()) else " ")
+    return " ".join("".join(out).split())
 
 
 def _looks_like_solicitation(caller_messages: list) -> str:
@@ -48,12 +77,21 @@ def _looks_like_solicitation(caller_messages: list) -> str:
     otherwise "". Only the caller's own words are considered, never Vela's.
     """
     try:
-        text = " ".join((m.get("content") or "") for m in caller_messages).lower()
-        if not text.strip():
+        raw = " ".join((m.get("content") or "") for m in caller_messages)
+        if not raw.strip():
             return ""
+        text = raw.lower()
         for phrase in SOLICITATION_PHRASES:
             if phrase in text:
                 return phrase
+
+        # short/truncated robocalls: everything the caller said is the opening
+        # of a script we already know
+        norm = _normalise(raw)
+        if len(norm) >= _MIN_SCRIPT_PREFIX:
+            for script in SOLICITATION_SCRIPTS:
+                if script.startswith(norm) or norm.startswith(script):
+                    return f"script prefix: {norm[:40]}"
     except Exception:
         logger.exception("solicitation_check_failed")
     return ""
