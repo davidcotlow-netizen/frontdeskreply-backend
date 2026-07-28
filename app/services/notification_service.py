@@ -13,6 +13,83 @@ from app.core.database import get_db
 logger = logging.getLogger(__name__)
 
 
+# ── Solicitation / robocall detection ─────────────────────────────────────────
+# Number blocking alone stopped working: on 2026-07-27 a single "Google business
+# listing verification" campaign hit one tenant 10 times from 10 different
+# 281 exchanges in one morning. We cannot blocklist +1281, that is Houston's own
+# area code and where the real customers are, so detection has to be by content.
+#
+# These phrases are deliberately long and specific. A real customer says "I found
+# you on Google"; nobody says "business listing verification". Single keywords
+# like "google" or "listing" must never appear here on their own.
+SOLICITATION_PHRASES = (
+    "business listing verification",
+    "listing verification",
+    "not verified on google",
+    "your business is not verified",
+    "google voice search",
+    "your google business listing",
+    "your google listing",
+    "claim your listing",
+    "verify your listing",
+    "update your listing",
+    "final notice regarding your",
+    "this is an urgent message",
+    "search engine optimization services",
+    "rank your website",
+    "yelp advertising",
+    "we can get you more leads",
+)
+
+
+def _looks_like_solicitation(caller_messages: list) -> str:
+    """
+    Return the matched phrase if the caller opened with a sales/robocall pitch,
+    otherwise "". Only the caller's own words are considered, never Vela's.
+    """
+    try:
+        text = " ".join((m.get("content") or "") for m in caller_messages).lower()
+        if not text.strip():
+            return ""
+        for phrase in SOLICITATION_PHRASES:
+            if phrase in text:
+                return phrase
+    except Exception:
+        logger.exception("solicitation_check_failed")
+    return ""
+
+
+def _auto_block_number(business_id: str, phone: str, reason: str) -> None:
+    """
+    Add a detected solicitor to `blocked_numbers` so any repeat call is rejected
+    at Twilio for $0 and never reaches Retell. The first call from a fresh number
+    always gets through, that is unavoidable, but it only ever costs us once.
+    Failures here must never break the notification path.
+    """
+    if not phone or not phone.startswith("+"):
+        return
+    try:
+        db = get_db()
+        existing = (
+            db.table("blocked_numbers")
+            .select("id")
+            .eq("business_id", business_id)
+            .eq("phone_number", phone)
+            .execute()
+        )
+        if existing.data:
+            return
+        db.table("blocked_numbers").insert({
+            "business_id": business_id,
+            "phone_number": phone,
+            "match_type": "exact",
+            "reason": reason[:200],
+        }).execute()
+        logger.info(f"auto_blocked_number {phone} for business {business_id}: {reason}")
+    except Exception:
+        logger.exception("auto_block_failed")
+
+
 def send_chat_escalation(
     owner_phone: str,
     business_name: str,
@@ -277,6 +354,19 @@ def send_call_engagement_email(business_id: str, session_id: str) -> dict:
     transcript_html = _format_transcript_html(transcripts, "call")
     caller_msgs = [t for t in transcripts if t["role"] == "caller"]
     first_question = caller_msgs[0]["content"][:150] if caller_msgs else "No caller speech recorded"
+
+    # Robocall / sales pitch: suppress the owner email and blocklist the number so
+    # repeats are rejected at Twilio. Owners were getting a notification per call
+    # from a campaign rotating across a whole area code, which also polluted the
+    # downstream lead sheet.
+    matched = _looks_like_solicitation(caller_msgs)
+    if matched:
+        _auto_block_number(business_id, caller_phone, f"auto: solicitation phrase '{matched}'")
+        logger.info(
+            f"call_notification_suppressed session={session_id} caller={caller_phone} "
+            f"matched='{matched}'"
+        )
+        return {"status": "skipped", "reason": "solicitation_detected", "matched": matched}
 
     try:
         import resend
