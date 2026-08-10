@@ -275,11 +275,14 @@ async def sync_retell_calls():
 
     headers = {"Authorization": f"Bearer {RETELL_API_KEY}", "Content-Type": "application/json"}
 
-    res = httpx.post("https://api.retellai.com/v2/list-calls", headers=headers, json={"limit": 50}, timeout=30)
+    # v3 endpoint (v2 deprecated 06/2026): response is {items, pagination_key, has_more},
+    # not a bare array like v2 returned.
+    res = httpx.post("https://api.retellai.com/v3/list-calls", headers=headers, json={"limit": 50}, timeout=30)
     if res.status_code != 200:
         return {"status": "error", "message": f"Retell API error: {res.status_code}"}
 
-    calls = res.json()
+    body = res.json()
+    calls = body.get("items", []) if isinstance(body, dict) else body
     synced = 0
 
     for call in calls:
