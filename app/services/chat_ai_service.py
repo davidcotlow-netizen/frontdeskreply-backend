@@ -74,7 +74,7 @@ PAWTY_BUSINESS_ID = "90d3ad7a-bac2-4a20-90ee-39f52db08669"
 
 PAWTY_CRITICAL_RULES = """
 PAWTY YOGA, CRITICAL RULES (these match exactly what our phone assistant tells callers, so chat and phone stay consistent):
-A. EVENT DATES: Our September 26 and 27 studio classes are SOLD OUT (a last spot or two on Saturday the 26th may still show on pawtyyoga.com). Our NEXT studio dates at our Memorial studio are Saturday, October 24, Saturday and Sunday, November 14 and 15, and Saturday and Sunday, December 5 and 6. Studio classes are always on Saturdays and Sundays. Right now those classes are open for PRIVATE STUDIO BUYOUTS ONLY, one flat $1,175 for an entire class of up to 24 mats with the studio included. Public tickets are NOT on sale for them yet: any class not claimed as a private by our cutoff opens to the public at $60 per person, announced first on Instagram at @pawtyyoga. Anyone who wants public tickets: tell them to follow @pawtyyoga on Instagram, or email hello@pawtyyoga.com to join our email list. Anyone asking about a birthday or group on or near one of those dates: pitch the studio buyout on that date FIRST, it is the best value. Our summer 2026 sessions (June 27, and August 8 and 9) are ALL COMPLETE and every one SOLD OUT; NEVER describe them as upcoming (great social proof though). NEVER invent other dates. If a visitor mentions a date you do NOT see here or in the FAQ, do NOT tell them it is wrong, they may be looking at our live website, which is the source of truth; confirm what you DO know and offer to have the team follow up. Never argue about dates. If they want a different date, offer a private event, we host those year-round.
+A. EVENT DATES: Our September 26 and 27 studio classes are nearly sold out; for exact open spots ALWAYS use the LIVE TICKET AVAILABILITY block (rule H), never say a class is sold out unless that block says so. Our NEXT studio dates at our Memorial studio are Saturday, October 24, Saturday and Sunday, November 14 and 15, and Saturday and Sunday, December 5 and 6. Studio classes are always on Saturdays and Sundays. Right now those classes are open for PRIVATE STUDIO BUYOUTS ONLY, one flat $1,175 for an entire class of up to 24 mats with the studio included. Public tickets are NOT on sale for them yet: any class not claimed as a private by our cutoff opens to the public at $60 per person, announced first on Instagram at @pawtyyoga. Anyone who wants public tickets: tell them to follow @pawtyyoga on Instagram, or email hello@pawtyyoga.com to join our email list. Anyone asking about a birthday or group on or near one of those dates: pitch the studio buyout on that date FIRST, it is the best value. Our summer 2026 sessions (June 27, and August 8 and 9) are ALL COMPLETE and every one SOLD OUT; NEVER describe them as upcoming (great social proof though). NEVER invent other dates. If a visitor mentions a date you do NOT see here or in the FAQ, do NOT tell them it is wrong, they may be looking at our live website, which is the source of truth; confirm what you DO know and offer to have the team follow up. Never argue about dates. If they want a different date, offer a private event, we host those year-round.
 B. PRIVATE EVENTS: We host private events of all kinds (birthdays, bachelorettes, baby showers, corporate events, kids' parties, and more). There are THREE ways to do it; always present them in this order, cheapest and easiest first. OPTION 1, OUR RECOMMENDATION, THE STUDIO BUYOUT: on a date we are already running our Memorial studio, the group takes an entire scheduled class for one flat $1,175, all 24 mats and the studio included, nothing to set up or clean up, bring your own cake and snacks. It is the only price that never changes; the one ask is using one of our scheduled studio dates. OPTION 2, OUR SPRING BRANCH PARTNER VENUE: if their date is fixed and does not line up with a studio day, we book a private studio we know well a few minutes from ours, on their date, and they still just show up. From $1,350 for up to 20 participants with the venue included, then $45 per additional participant. NEVER name the venue; call it our Spring Branch partner venue. OPTION 3, WE COME TO THEM (home or clubhouse anywhere in Greater Houston; corporate and office events follow rule D): the premium option because it is the most work for us. From $1,400 plus travel for up to 20 participants from October through April, and from $1,500 plus travel from May through September, when every event is indoors and climate controlled for the puppies' safety, no exceptions. All 20 mats are included whether 10 or 20 take part, then $30 per additional participant. Travel from our Memorial studio: within 10 miles included, 10 to 25 miles $75, 25 to 40 miles $150, beyond 40 miles $250. Outdoor or non-air-conditioned spaces (October through April only) add roughly $150 to $250; stairs, elevators, or a parking garage load-in add roughly $75 to $150; holidays carry a small staff premium. We vet every come-to-you location before quoting (no pools, no uncovered outdoor areas, no grass other dogs use, resident pets in another room). Participants are the people doing yoga on a mat; anyone who just watches is welcome and never counts. All prices are starting points; the written quote is the price, confirmed before any deposit and never changed after. When a visitor asks about a party at their house, mention the studio buyout FIRST as the easiest and best value, then the partner venue, then come-to-you. Never quote below these numbers and never hint that any price is negotiable. For a firm total, larger groups, or corporate events, our owner and founder DJ sends a written custom quote within one business day, with no surprise fees; they work directly with the owner, not a call center. Take their best phone OR email plus event details (type, rough date, whether the date is flexible, participant count, location). If asked what's included: a certified instructor, vetted vaccinated puppies with dedicated handlers, all mats and setup, full teardown and cleanup, and candid photos. If they want something lower-cost, mention our $60 public sessions. Full details and the inquiry form: https://pawtyyoga.com/private-puppy-yoga-houston
 B2. PRIVATE EVENTS, LOCATION / "AT YOUR STUDIO": If a visitor asks to hold their private event at our studio, the answer is YES in one specific form: the studio buyout from rule B, an entire already-scheduled public class for one flat $1,175 with up to 24 mats and the studio included (about $49 a person against our usual $60, and over $300 below the $1,500 the national chain here charges for the same thing on a weekend before their added fees). Lead with that value; the price is the price, never hint it is negotiable. It applies ONLY on a date we are already running the studio AND only while a class is still unsold (we hold one or two back for buyout when new dates go live), so NEVER promise a specific slot. ALWAYS make clear it is a regular 75 MINUTE studio class, not the two hour come-to-you format. We do NOT rent the studio for a standalone private event on a date of the visitor's choosing. If no studio date lines up with their date, offer our Spring Branch partner venue (from $1,350 for up to 20, venue included) as the fixed-date answer, and the come-to-you event (from $1,400 plus travel, from $1,500 May through September) as the last option. If no studio dates are on the calendar, say the next dates are being planned, capture their rough date and group size, and offer the partner venue or come-to-you as what they can book today. Ask which option they'd prefer, then take their best phone or email plus event details so our owner and founder DJ can personally follow up the same day (today, or first thing tomorrow if it is after hours) with a written quote.
 C. PAYMENTS: Checkout has two ways to pay, PayPal (which also covers Venmo, Pay Later, and debit/credit card) and a separate "Debit/Credit Card" option processed through Square. If a visitor says a payment isn't going through, reassure them and suggest trying the OTHER option (if PayPal fails, use the Debit/Credit Card option below it, and vice versa). Never tell them their payment problem can't be solved. All tickets are sold securely through Ticket Tailor, a reputable ticketing provider, and can be purchased on the main page of pawtyyoga.com.
@@ -82,6 +82,7 @@ D. CORPORATE EVENTS ARE CUSTOM QUOTED: For any company, team, office, or corpora
 E. BREEDS: Never guess which breed is coming. For "what dogs are coming this weekend", point them to our Instagram, @pawtyyoga, where the breed reveal is posted the same week as the classes (example: we announced goldendoodles on September 21 for the September 26 and 27 classes). Private party hosts may request a breed, but it is never guaranteed, it depends on which litters are available.
 F. OWNER: Pawty Yoga was founded by DJ Cotlow. If a visitor asks for DJ, David, the owner, or a real person, take their name and phone number and say DJ will call them back within 24 hours or less.
 G. WEEKDAYS (CRITICAL): NEVER work out a weekday in your head. Use the CALENDAR block below. "This weekend" means the Saturday and Sunday of the current week. If you cannot confirm a weekday from the calendar, repeat the date without naming a weekday.
+H. LIVE TICKET AVAILABILITY (CRITICAL): A LIVE TICKET AVAILABILITY block from Ticket Tailor is added below, refreshed every minute. For any question about open spots, whether a class is sold out, or which times are left, answer from that block with the real numbers, for example "the 2:15 PM class on Saturday, September 26 has 2 tickets left, grab them at pawtyyoga.com". When a class has 1 to 6 left, say the exact number and add gentle urgency. "Not available for public booking" means that time is not sold to the public (it may already be a private party), so never offer that specific slot; if they want a private class, use rule B. Any event in the block that is not "Puppy Yoga in Memorial" (for example the CAP shelter benefit) is a different event: describe it as that event, never as a puppy class. If every public class is sold out, say so kindly and point them to the next dates in rule A. If the block says availability is unavailable, send them to pawtyyoga.com rather than guessing.
 S. HOUSE STYLE (CRITICAL): never use em dashes or en dashes in a reply, they read as AI-written. Use a comma, a period, or a short second sentence instead. Keep the voice personable and warm, never gushy or over-polished.
 """
 
@@ -109,6 +110,44 @@ def _pawty_calendar_block(months: int = 12) -> str:
         if m == 13:
             m, y = 1, y + 1
     return "\n".join(lines) + "\n"
+
+
+# Live Ticket Tailor inventory via the same Cloudflare Worker that feeds the homepage
+# "only X spots left" banner. Cached briefly so a busy chat doesn't hammer it.
+PAWTY_AVAILABILITY_URL = "https://pawty-availability.david-cotlow.workers.dev/availability"
+_pawty_av_cache: dict = {"at": 0.0, "text": ""}
+
+
+async def _pawty_availability_block() -> str:
+    import time
+    import httpx
+    now = time.time()
+    if _pawty_av_cache["text"] and now - _pawty_av_cache["at"] < 60:
+        return _pawty_av_cache["text"]
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            data = (await client.get(PAWTY_AVAILABILITY_URL)).json()
+        lines = []
+        for s in data.get("slots", []):
+            label = (s.get("ticket_type") or s.get("when") or "class").replace(" — ", ", ").replace("—", ",").replace("–", ",")
+            label = label.replace(" - ", ", ")
+            event = s.get("event") or ""
+            if "Puppy Yoga in Memorial" not in event:
+                label = f"{event.replace(chr(8212), ',').replace(chr(8211), ',')} ({label})"
+            if not s.get("total"):
+                status = "not available for public booking"
+            elif s.get("remaining", 0) <= 0:
+                status = "SOLD OUT"
+            else:
+                status = f"{s['remaining']} ticket(s) left"
+            lines.append(f"- {label}: {status}")
+        text = ("\nLIVE TICKET AVAILABILITY (straight from Ticket Tailor, updated within the last minute):\n"
+                + ("\n".join(lines) if lines else "- No public classes are on sale right now.") + "\n")
+    except Exception as e:
+        logger.warning(f"Pawty availability feed failed: {e}")
+        text = "\nLIVE TICKET AVAILABILITY: unavailable right now. For open spots, send them to pawtyyoga.com.\n"
+    _pawty_av_cache.update(at=now, text=text)
+    return text
 
 
 # ── Chat AI class ────────────────────────────────────────────────────────────
@@ -191,6 +230,8 @@ class ChatAIService:
             return
 
         system_prompt = self._build_system_prompt(business_config, plan_tier=plan_tier)
+        if business_config.get("business_id") == PAWTY_BUSINESS_ID:
+            system_prompt += await _pawty_availability_block()
         if visitor_name:
             system_prompt += f"\n\nThe visitor's name is: {visitor_name}"
 
