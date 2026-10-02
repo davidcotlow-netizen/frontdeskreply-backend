@@ -6,6 +6,7 @@ Reuses existing Twilio integration from sms_service.py.
 """
 
 import html as _html
+import re as _re
 import logging
 from app.services.sms_service import send_sms
 from app.core.config import get_settings
@@ -244,7 +245,8 @@ def _format_transcript_html(messages: list, channel: str = "chat") -> str:
     html_parts = []
     for msg in messages:
         role = msg.get("role", "")
-        content = _html.escape(msg.get("content", "") or "")
+        # strip voice "expressive mode" tags like [happy] / [excited] from transcripts
+        content = _html.escape(_re.sub(r"\[[a-z ]{2,20}\]\s*", "", msg.get("content", "") or ""))
 
         if role in ("visitor", "caller", "human"):
             label = "Customer"

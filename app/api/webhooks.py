@@ -165,12 +165,16 @@ def _create_message_and_enqueue(
 
     message_id = msg.data[0]["id"]
     try:
+        import os
+        if os.environ.get("CELERY_ENABLED") != "1":
+            # No worker/Redis in production; .delay() would block retrying the broker. Alert the owner instead.
+            raise RuntimeError("celery disabled")
         process_inbound_message.delay(message_id)
         logger.info(f"Enqueued message {message_id} via {channel_type} (reply via {contact_preference})")
     except Exception:
         # No Celery worker/Redis in production: the message is saved, so alert the owner directly
         # instead of 500ing after the insert (the lead would otherwise sit unseen).
-        logger.exception(f"enqueue_failed message={message_id}; emailing owner instead")
+        logger.warning(f"no task queue for message={message_id}; emailing owner instead")
         try:
             import html
             from app.services.notification_service import send_owner_alert

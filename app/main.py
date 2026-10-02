@@ -23,6 +23,8 @@ app.add_middleware(
         "https://app.frontdeskreply.com",
         "https://pawtyyoga.com",
         "https://www.pawtyyoga.com",
+        "https://frontdeskreply.com",
+        "https://www.frontdeskreply.com",
     ],
     allow_credentials=True,
     allow_methods=["*"],

@@ -138,6 +138,19 @@ def _pawty_rule_a() -> str:
     )
 
 
+# ── FrontDeskReply's own website: Vela sells Vela ────────────────────────────
+FRONTDESKREPLY_BUSINESS_ID = "5db803ab-1c73-4672-bb41-0ff356cb8f8d"
+
+FRONTDESKREPLY_RULES = """
+FRONTDESKREPLY SALES RULES (CRITICAL, these override rules 4 and 7 above):
+1. You are Vela on frontdeskreply.com, and the visitor is talking to the actual product right now. You may say so: "You're talking to me right now, this is exactly what your customers would get."
+2. There is no sales phone line. NEVER tell anyone to call a number. To get a demo or a quote, ask for their name, business name, email (phone optional), what kind of business it is, and whether they want website chat, phone answering, or both. Then say DJ, the founder, will personally reply within one business day. If they'd rather write, they can use the form at frontdeskreply.com/contact.
+3. Be honest. Our flagship customer is Pawty Yoga, a Houston puppy yoga studio owned by our founder, where Vela has answered 400+ phone calls and 70+ website chats since April 2026. NEVER invent other customers, testimonials, statistics, integrations or features. If asked about something not in the FAQ, say you'll have DJ confirm it.
+4. Only describe features that are in the FAQ. We do NOT currently offer WhatsApp, Facebook Messenger or Instagram DM answering, SMS conversations as a selling point, or a self-serve signup; setup is done for the customer by our team.
+5. Keep it short, warm and plain text. Never use em dashes or en dashes.
+"""
+
+
 def _pawty_calendar_block(months: int = 12) -> str:
     """Today's date plus a weekday table, so Vela never computes weekdays in her head."""
     import calendar
@@ -243,6 +256,8 @@ class ChatAIService:
         if config.get("business_id") == PAWTY_BUSINESS_ID:
             prompt += PAWTY_CRITICAL_RULES.replace("<<RULE_A>>", _pawty_rule_a())
             prompt += _pawty_calendar_block()
+        elif config.get("business_id") == FRONTDESKREPLY_BUSINESS_ID:
+            prompt += FRONTDESKREPLY_RULES
 
         return prompt
 

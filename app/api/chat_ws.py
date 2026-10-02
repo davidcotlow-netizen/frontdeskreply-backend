@@ -284,8 +284,9 @@ async def _chat_websocket_session(websocket: WebSocket, business_id: str):
 
                 if ai_exchange_count >= MAX_AI_REPLIES_PER_SESSION:
                     add_chat_message(session_id=session_id, role="visitor", content=content)
-                    limit_msg = ("Thanks so much for chatting! For anything else, email hello@pawtyyoga.com "
-                                 "or leave your name and number here and our owner will get back to you within 24 hours.")
+                    contact = config.get("email") or "us"
+                    limit_msg = (f"Thanks so much for chatting! For anything else, email {contact}, "
+                                 "or leave your name and number here and we'll get back to you within 24 hours.")
                     await send_frame(websocket, {"type": "ai_done", "content": limit_msg, "confidence": 1.0})
                     continue
 
