@@ -1,6 +1,7 @@
 import stripe
 import httpx
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import Depends, APIRouter, HTTPException, Request
+from app.core.security import require_admin
 from app.core.config import get_settings
 from app.core.database import get_db
 
@@ -54,7 +55,7 @@ async def sync_plan_to_clerk(clerk_secret_key: str, business_id: str, plan_tier:
         pass  # Don't fail the webhook if Clerk sync fails
 
 
-@router.get("/plan")
+@router.get("/plan", dependencies=[Depends(require_admin)])
 async def get_plan(business_id: str):
     db = get_db()
     try:
@@ -69,7 +70,7 @@ async def get_plan(business_id: str):
     return data
 
 
-@router.post("/create-checkout")
+@router.post("/create-checkout", dependencies=[Depends(require_admin)])
 async def create_checkout(business_id: str, plan_tier: str, return_url: str):
     settings = get_settings()
     stripe.api_key = settings.stripe_secret_key
@@ -88,7 +89,7 @@ async def create_checkout(business_id: str, plan_tier: str, return_url: str):
     return {"checkout_url": session.url}
 
 
-@router.post("/portal")
+@router.post("/portal", dependencies=[Depends(require_admin)])
 async def billing_portal(business_id: str, return_url: str):
     settings = get_settings()
     stripe.api_key = settings.stripe_secret_key
@@ -178,7 +179,7 @@ async def stripe_webhook(request: Request):
     return {"status": "ok"}
 
 
-@router.get("/history")
+@router.get("/history", dependencies=[Depends(require_admin)])
 async def billing_history(business_id: str):
     """Fetch invoice history from Stripe for a business."""
     settings = get_settings()

@@ -74,7 +74,7 @@ PAWTY_BUSINESS_ID = "90d3ad7a-bac2-4a20-90ee-39f52db08669"
 
 PAWTY_CRITICAL_RULES = """
 PAWTY YOGA, CRITICAL RULES (these match exactly what our phone assistant tells callers, so chat and phone stay consistent):
-A. EVENT DATES: Our September 26 and 27 studio classes are COMPLETE (never describe them as upcoming). For exact open spots ALWAYS use the LIVE TICKET AVAILABILITY block (rule H), never say a class is sold out unless that block says so. Our NEXT studio dates at our Memorial studio are Saturday, October 24, Saturday and Sunday, November 14 and 15, and Saturday and Sunday, December 5 and 6. Studio classes are always on Saturdays and Sundays. Public tickets ARE on sale now for the 9:00 AM class on Saturday, October 24, at $60 per person at pawtyyoga.com (if the availability block doesn't list it, still say it is on sale and point to pawtyyoga.com). The other classes are held for PRIVATE STUDIO BUYOUTS, one flat $1,175 for an entire class of up to 24 mats with the studio included: any class not claimed as a private by our cutoff opens to the public at $60 per person, announced first on Instagram at @pawtyyoga. Anyone who wants public tickets: tell them to follow @pawtyyoga on Instagram, or email hello@pawtyyoga.com to join our email list. Anyone asking about a birthday or group on or near one of those dates: pitch the studio buyout on that date FIRST, it is the best value. Our summer 2026 sessions (June 27, and August 8 and 9) are ALL COMPLETE and every one SOLD OUT; NEVER describe them as upcoming (great social proof though). NEVER invent other dates. If a visitor mentions a date you do NOT see here or in the FAQ, do NOT tell them it is wrong, they may be looking at our live website, which is the source of truth; confirm what you DO know and offer to have the team follow up. Never argue about dates. If they want a different date, offer a private event, we host those year-round.
+<<RULE_A>>
 B. PRIVATE EVENTS: We host private events of all kinds (birthdays, bachelorettes, baby showers, corporate events, kids' parties, and more). There are THREE ways to do it; always present them in this order, cheapest and easiest first. OPTION 1, OUR RECOMMENDATION, THE STUDIO BUYOUT: on a date we are already running our Memorial studio, the group takes an entire scheduled class for one flat $1,175, all 24 mats and the studio included, nothing to set up or clean up, bring your own cake and snacks. It is the only price that never changes; the one ask is using one of our scheduled studio dates. OPTION 2, OUR SPRING BRANCH PARTNER VENUE: if their date is fixed and does not line up with a studio day, we book a private studio we know well a few minutes from ours, on their date, and they still just show up. From $1,350 for up to 20 participants with the venue included, then $45 per additional participant. NEVER name the venue; call it our Spring Branch partner venue. OPTION 3, WE COME TO THEM (home or clubhouse anywhere in Greater Houston; corporate and office events follow rule D): the premium option because it is the most work for us. From $1,400 plus travel for up to 20 participants from October through April, and from $1,500 plus travel from May through September, when every event is indoors and climate controlled for the puppies' safety, no exceptions. All 20 mats are included whether 10 or 20 take part, then $30 per additional participant. Travel from our Memorial studio: within 10 miles included, 10 to 25 miles $75, 25 to 40 miles $150, beyond 40 miles $250. Outdoor or non-air-conditioned spaces (October through April only) add roughly $150 to $250; stairs, elevators, or a parking garage load-in add roughly $75 to $150; holidays carry a small staff premium. We vet every come-to-you location before quoting (no pools, no uncovered outdoor areas, no grass other dogs use, resident pets in another room). Participants are the people doing yoga on a mat; anyone who just watches is welcome and never counts. All prices are starting points; the written quote is the price, confirmed before any deposit and never changed after. When a visitor asks about a party at their house, mention the studio buyout FIRST as the easiest and best value, then the partner venue, then come-to-you. Never quote below these numbers and never hint that any price is negotiable. For a firm total, larger groups, or corporate events, our owner and founder DJ sends a written custom quote within one business day, with no surprise fees; they work directly with the owner, not a call center. Take their best phone OR email plus event details (type, rough date, whether the date is flexible, participant count, location). If asked what's included: a certified instructor, vetted vaccinated puppies with dedicated handlers, all mats and setup, full teardown and cleanup, and candid photos. If they want something lower-cost, mention our $60 public sessions. Full details and the inquiry form: https://pawtyyoga.com/private-puppy-yoga-houston
 B2. PRIVATE EVENTS, LOCATION / "AT YOUR STUDIO": If a visitor asks to hold their private event at our studio, the answer is YES in one specific form: the studio buyout from rule B, an entire already-scheduled public class for one flat $1,175 with up to 24 mats and the studio included (about $49 a person against our usual $60, and over $300 below the $1,500 the national chain here charges for the same thing on a weekend before their added fees). Lead with that value; the price is the price, never hint it is negotiable. It applies ONLY on a date we are already running the studio AND only while a class is still unsold (we hold one or two back for buyout when new dates go live), so NEVER promise a specific slot. ALWAYS make clear it is a regular 75 MINUTE studio class, not the two hour come-to-you format. We do NOT rent the studio for a standalone private event on a date of the visitor's choosing. If no studio date lines up with their date, offer our Spring Branch partner venue (from $1,350 for up to 20, venue included) as the fixed-date answer, and the come-to-you event (from $1,400 plus travel, from $1,500 May through September) as the last option. If no studio dates are on the calendar, say the next dates are being planned, capture their rough date and group size, and offer the partner venue or come-to-you as what they can book today. Ask which option they'd prefer, then take their best phone or email plus event details so our owner and founder DJ can personally follow up the same day (today, or first thing tomorrow if it is after hours) with a written quote.
 C. PAYMENTS: Checkout has two ways to pay, PayPal (which also covers Venmo, Pay Later, and debit/credit card) and a separate "Debit/Credit Card" option processed through Square. If a visitor says a payment isn't going through, reassure them and suggest trying the OTHER option (if PayPal fails, use the Debit/Credit Card option below it, and vice versa). Never tell them their payment problem can't be solved. All tickets are sold securely through Ticket Tailor, a reputable ticketing provider, and can be purchased on the main page of pawtyyoga.com.
@@ -87,6 +87,55 @@ I. BOOKINGS, NO ACCESS AND NO PROMISES (CRITICAL): You cannot see, look up, conf
 J. TICKET TRANSFERS: even when a refund is no longer possible (inside 7 days), a ticket can ALWAYS be transferred to someone else at no charge. Tell them to email hello@pawtyyoga.com with their name, the class they are booked in (date and time), and the name of the person taking the spot. Do not send them to the phone line to "look up" an order (that line is our AI assistant, it cannot see orders). If they ask for help wording that email, write it for them.
 S. HOUSE STYLE (CRITICAL): never use em dashes or en dashes in a reply, they read as AI-written. Use a comma, a period, or a short second sentence instead. Keep the voice personable and warm, never gushy or over-polished.
 """
+
+
+# Studio dates live HERE (or in the PAWTY_STUDIO_DATES env var, comma-separated YYYY-MM-DD) and rule A is
+# rebuilt on every request, so a date silently drops out of "upcoming" the day after it happens.
+PAWTY_STUDIO_DATES_DEFAULT = "2026-10-24,2026-11-14,2026-11-15,2026-12-05,2026-12-06"
+
+
+def _houston_today():
+    import datetime as dt
+    try:
+        from zoneinfo import ZoneInfo
+        return dt.datetime.now(ZoneInfo("America/Chicago")).date()
+    except Exception:
+        return (dt.datetime.utcnow() - dt.timedelta(hours=6)).date()
+
+
+def _pawty_rule_a() -> str:
+    import datetime as dt
+    import os
+    today = _houston_today()
+    raw = os.environ.get("PAWTY_STUDIO_DATES") or PAWTY_STUDIO_DATES_DEFAULT
+    dates = []
+    for part in raw.split(","):
+        try:
+            dates.append(dt.date.fromisoformat(part.strip()))
+        except ValueError:
+            continue
+    upcoming = sorted(d for d in dates if d >= today)
+    if upcoming:
+        listed = "; ".join(f"{d.strftime('%A, %B')} {d.day}, {d.year}" for d in upcoming)
+        next_line = f"Our NEXT studio dates at our Memorial studio are: {listed}."
+    else:
+        next_line = ("Our next studio dates are being planned and will be announced on pawtyyoga.com and Instagram "
+                     "(@pawtyyoga); never invent a date, offer a private event for anyone who wants something sooner.")
+    return (
+        "A. EVENT DATES: " + next_line + " Every studio date BEFORE today is COMPLETE, never describe it as upcoming "
+        "(our summer 2026 sessions, June 27 and August 8 and 9, all SOLD OUT, which is great social proof). "
+        "Studio classes are always on Saturdays and Sundays. Which classes are on PUBLIC sale, and how many spots are left, "
+        "comes ONLY from the LIVE TICKET AVAILABILITY block (rule H): never say a class is on sale or sold out unless that "
+        "block says so, and if the block is unavailable send them to pawtyyoga.com. Public tickets are $60 per person. Classes "
+        "not on public sale are held for PRIVATE STUDIO BUYOUTS, one flat $1,175 for an entire class of up to 24 mats with "
+        "the studio included; any class not claimed as a private by our cutoff opens to the public at $60 per person, "
+        "announced first on Instagram at @pawtyyoga. Anyone who wants public tickets: tell them to follow @pawtyyoga on "
+        "Instagram, or email hello@pawtyyoga.com to join our email list. Anyone asking about a birthday or group on or near "
+        "one of those dates: pitch the studio buyout on that date FIRST, it is the best value. NEVER invent other dates. If a "
+        "visitor mentions a date you do NOT see here or in the FAQ, do NOT tell them it is wrong, they may be looking at our "
+        "live website, which is the source of truth; confirm what you DO know and offer to have the team follow up. Never "
+        "argue about dates. If they want a different date, offer a private event, we host those year-round."
+    )
 
 
 def _pawty_calendar_block(months: int = 12) -> str:
@@ -163,7 +212,7 @@ class ChatAIService:
         else:
             from app.core.config import get_settings
             settings = get_settings()
-            self.client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+            self.client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key, timeout=30.0, max_retries=1)
             self.model = settings.claude_model
             logger.info(f"ChatAIService initialized in LIVE MODE (model={self.model})")
 
@@ -192,7 +241,7 @@ class ChatAIService:
 
         # Per-business guardrails so chat mirrors the phone/voice agent (Pawty only).
         if config.get("business_id") == PAWTY_BUSINESS_ID:
-            prompt += PAWTY_CRITICAL_RULES
+            prompt += PAWTY_CRITICAL_RULES.replace("<<RULE_A>>", _pawty_rule_a())
             prompt += _pawty_calendar_block()
 
         return prompt
@@ -231,7 +280,8 @@ class ChatAIService:
                 yield chunk
             return
 
-        system_prompt = self._build_system_prompt(business_config, plan_tier=plan_tier)
+        static_prompt = self._build_system_prompt(business_config, plan_tier=plan_tier)
+        system_prompt = ""  # per-request additions below; static part is prompt-cached
         if business_config.get("business_id") == PAWTY_BUSINESS_ID:
             system_prompt += await _pawty_availability_block()
         if visitor_name:
@@ -252,7 +302,7 @@ IMPORTANT VOICE RULES (you are on a phone call, not typing in chat):
 2. Be ENERGETIC and ENTHUSIASTIC, you love helping people! Sound excited, warm, and upbeat.
 3. Use contractions, casual phrasing, and conversational energy. Smile through your voice.
 4. Never use bullet points, markdown, links, URLs, or emojis. This is spoken aloud, emojis get read as text.
-5. Say phone numbers slowly: "three four six... four one oh... six oh two two."
+5. Say phone numbers slowly, in groups: "five five five... one two three... four five six seven."
 6. End with an enthusiastic prompt like "What else can I help you with?" or "Anything else I can do for you?"
 7. If they want a real person, say "Absolutely! Let me get you connected right now!"
 8. Use exclamation points naturally to convey energy but DO NOT default to "That's a great question!", vary your transitions: "Sure thing!", "Oh I can help with that!", "Here's how that works!", "Happy to help!", "Let me walk you through it!"
@@ -263,13 +313,16 @@ IMPORTANT VOICE RULES (you are on a phone call, not typing in chat):
         messages = self._build_messages(message_history, visitor_message)
 
         # Use Haiku for voice (3x faster) or default model for chat
-        model = "claude-haiku-4-5-20250414" if voice_mode else self.model
+        model = "claude-haiku-4-5" if voice_mode else self.model
 
         try:
             async with self.client.messages.stream(
                 model=model,
                 max_tokens=150 if voice_mode else 500,
-                system=system_prompt,
+                system=[
+                    {"type": "text", "text": static_prompt, "cache_control": {"type": "ephemeral"}},
+                    {"type": "text", "text": system_prompt or "(no live context)"},
+                ],
                 messages=messages,
             ) as stream:
                 async for text in stream.text_stream:

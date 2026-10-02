@@ -5,6 +5,7 @@ Also sends engagement summary emails after chat/call/SMS interactions.
 Reuses existing Twilio integration from sms_service.py.
 """
 
+import html as _html
 import logging
 from app.services.sms_service import send_sms
 from app.core.config import get_settings
@@ -243,7 +244,7 @@ def _format_transcript_html(messages: list, channel: str = "chat") -> str:
     html_parts = []
     for msg in messages:
         role = msg.get("role", "")
-        content = msg.get("content", "")
+        content = _html.escape(msg.get("content", "") or "")
 
         if role in ("visitor", "caller", "human"):
             label = "Customer"
@@ -290,9 +291,11 @@ def send_chat_engagement_email(business_id: str, session_id: str) -> dict:
     session = db.table("chat_sessions").select("*").eq("id", session_id).maybe_single().execute()
     session_data = session.data if session else {}
 
-    visitor_name = session_data.get("visitor_name", "Unknown visitor")
-    visitor_email = session_data.get("visitor_email", "Not provided")
-    visitor_phone = session_data.get("visitor_phone", "Not provided")
+    meta = (session_data or {}).get("metadata") or {}
+    visitor_name = _html.escape(session_data.get("visitor_name") or meta.get("visitor_name") or "Unknown visitor")
+    visitor_email = _html.escape(session_data.get("visitor_email") or meta.get("visitor_email") or "Not provided")
+    # phone is captured into chat_sessions.metadata, not a top-level column
+    visitor_phone = _html.escape(session_data.get("visitor_phone") or meta.get("visitor_phone") or meta.get("phone") or "Not provided")
 
     # Get messages
     messages_res = db.table("chat_messages").select("role, content, sent_at").eq(
@@ -354,7 +357,7 @@ def send_chat_engagement_email(business_id: str, session_id: str) -> dict:
 
 # ── Voice call engagement notification ──────────────────────────────────────
 
-def send_call_engagement_email(business_id: str, session_id: str) -> dict:
+def send_call_engagement_email(business_id: str, session_id: str, allow_auto_block: bool = True) -> dict:
     """
     Send a summary email to the business owner after a voice call ends.
     Includes caller info + transcript.
@@ -391,7 +394,7 @@ def send_call_engagement_email(business_id: str, session_id: str) -> dict:
 
     transcript_html = _format_transcript_html(transcripts, "call")
     caller_msgs = [t for t in transcripts if t["role"] == "caller"]
-    first_question = caller_msgs[0]["content"][:150] if caller_msgs else "No caller speech recorded"
+    first_question = _html.escape(caller_msgs[0]["content"][:150]) if caller_msgs else "No caller speech recorded"
 
     # Robocall / sales pitch: suppress the owner email and blocklist the number so
     # repeats are rejected at Twilio. Owners were getting a notification per call
@@ -399,7 +402,8 @@ def send_call_engagement_email(business_id: str, session_id: str) -> dict:
     # downstream lead sheet.
     matched = _looks_like_solicitation(caller_msgs)
     if matched:
-        _auto_block_number(business_id, caller_phone, f"auto: solicitation phrase '{matched}'")
+        if allow_auto_block:
+            _auto_block_number(business_id, caller_phone, f"auto: solicitation phrase '{matched}'")
         logger.info(
             f"call_notification_suppressed session={session_id} caller={caller_phone} "
             f"matched='{matched}'"
@@ -525,4 +529,29 @@ def send_sms_engagement_email(
 
     except Exception as e:
         logger.error(f"SMS engagement email failed: {e}")
+        return {"status": "error", "error": str(e)}
+
+
+# ── Owner alerts (voicemail fallback, outages) ──────────────────────────────
+
+def send_owner_alert(business_id: str, subject: str, html_body: str) -> dict:
+    """Plain owner alert email. Never raises."""
+    try:
+        settings = get_settings()
+        owner_email = _get_owner_email(business_id)
+        if not (settings.resend_api_key and owner_email):
+            logger.error(f"owner_alert_not_sent business={business_id} subject={subject!r} (no resend key or owner email)")
+            return {"status": "skipped"}
+        import resend
+        resend.api_key = settings.resend_api_key
+        result = resend.Emails.send({
+            "from": f"{_get_business_name(business_id)} Alerts <hello@frontdeskreply.com>",
+            "to": [owner_email],
+            "subject": subject,
+            "html": html_body,
+        })
+        logger.info(f"owner_alert_sent business={business_id} subject={subject!r}")
+        return {"status": "sent", "id": (result or {}).get("id", "")}
+    except Exception as e:
+        logger.error(f"owner_alert_failed business={business_id}: {e}")
         return {"status": "error", "error": str(e)}

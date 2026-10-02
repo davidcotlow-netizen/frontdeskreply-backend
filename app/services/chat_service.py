@@ -198,24 +198,31 @@ def get_session_messages(session_id: str, limit: int = 50) -> list:
     db = get_db()
     res = db.table("chat_messages").select("*").eq(
         "session_id", session_id
-    ).order("sent_at", desc=False).limit(limit).execute()
-    return res.data or []
+    ).order("sent_at", desc=True).limit(limit).execute()
+    # newest `limit` messages, returned oldest-first (the old ascending+limit kept the OLDEST ones,
+    # so long chats lost what the visitor just said)
+    return list(reversed(res.data or []))
 
 
 # ── Business eligibility ─────────────────────────────────────────────────────
 
 def check_business_chat_eligible(business_id: str) -> bool:
     """Check if business exists and is on Growth or Pro tier (live chat enabled)."""
-    db = get_db()
-    plan_res = db.table("subscription_plans").select(
-        "plan_tier"
-    ).eq("business_id", business_id).eq("status", "active").maybe_single().execute()
-
-    if not plan_res or not plan_res.data:
+    from app.core.config import get_settings
+    always_on = {b.strip() for b in get_settings().always_on_business_ids.split(",") if b.strip()}
+    if business_id in always_on:
+        return True  # never let a billing row glitch take a live business offline
+    try:
+        db = get_db()
+        plan_res = db.table("subscription_plans").select(
+            "plan_tier"
+        ).eq("business_id", business_id).eq("status", "active").limit(1).execute()
+    except Exception:
         return False
-
-    tier = plan_res.data.get("plan_tier", "starter")
-    return tier in ("growth", "pro")
+    rows = plan_res.data or []
+    if not rows:
+        return False
+    return rows[0].get("plan_tier") in ("growth", "pro")
 
 
 def get_business_chat_config(business_id: str) -> Optional[dict]:

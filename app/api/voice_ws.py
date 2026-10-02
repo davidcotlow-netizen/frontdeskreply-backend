@@ -18,7 +18,8 @@ import random
 import re
 import time
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import Depends, APIRouter, WebSocket, WebSocketDisconnect
+from app.core.security import require_admin
 
 from app.services.voice_service import (
     add_call_transcript,
@@ -318,14 +319,14 @@ async def voice_websocket(websocket: WebSocket, business_id: str):
 
 # ── Dashboard endpoints ──────────────────────────────────────────────────────
 
-@router.get("/api/v1/voice/calls")
+@router.get("/api/v1/voice/calls", dependencies=[Depends(require_admin)])
 async def list_calls(business_id: str, period: str = "month"):
     from app.services.voice_service import get_call_history
     calls = get_call_history(business_id, period)
     return {"calls": calls, "count": len(calls)}
 
 
-@router.get("/api/v1/voice/calls/{session_id}/transcripts")
+@router.get("/api/v1/voice/calls/{session_id}/transcripts", dependencies=[Depends(require_admin)])
 async def get_transcripts(session_id: str):
     transcripts = get_call_transcripts(session_id)
     return {"transcripts": transcripts}

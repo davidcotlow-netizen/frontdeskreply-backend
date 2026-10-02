@@ -6,7 +6,8 @@ Uses Google Chirp3-HD-Leda for natural-sounding voice.
 
 import logging
 import re
-from fastapi import APIRouter, Request, Response
+from fastapi import Depends, APIRouter, Request, Response
+from app.core.security import verify_twilio
 from fastapi.responses import PlainTextResponse
 
 from app.core.database import get_db
@@ -126,7 +127,70 @@ def _get_retell_voice_agent(business_id: str) -> str | None:
     return None
 
 
-@router.post("/inbound")
+def _bridge_twiml(from_number: str, to_number: str, business_id: str) -> str:
+    """Bridge to Retell over SIP. If Retell doesn't answer (outage, credits at $0), Twilio
+    calls /voice/dial-result, which takes a voicemail and alerts the owner instead of dead air."""
+    sip_uri = f"sip:{to_number}@sip.retellai.com"
+    action = f"/api/v1/voice/dial-result?business_id={business_id}"
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        f'<Response><Dial answerOnBridge="true" callerId="{escape_xml(from_number)}" timeout="20" '
+        f'action="{escape_xml(action)}" method="POST">'
+        f'<Sip>{escape_xml(sip_uri)}</Sip></Dial></Response>'
+    )
+
+
+def _voicemail_owner_alert(business_id: str, subject: str, lines: list[str]) -> None:
+    if not business_id:
+        logger.error(f"voicemail_alert_no_business: {subject} | {' | '.join(lines)}")
+        return
+    from app.services.notification_service import send_owner_alert
+    body = "".join(f"<p>{escape_xml(l)}</p>" for l in lines)
+    send_owner_alert(business_id, subject, f'<div style="font-family:Arial,sans-serif">{body}</div>')
+
+
+@router.post("/dial-result", dependencies=[Depends(verify_twilio)])
+async def dial_result(request: Request):
+    form = await request.form()
+    status = (form.get("DialCallStatus") or "").lower()
+    business_id = request.query_params.get("business_id", "")
+    caller = form.get("From", "")
+    if status in ("completed", "answered"):
+        return Response(content='<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Response>',
+                        media_type="application/xml")
+    logger.error(f"voice_retell_bridge_failed status={status} caller={caller} business={business_id}")
+    _voicemail_owner_alert(business_id, f"Vela did not answer a call ({status or 'unknown'})", [
+        f"A call from {caller} could not reach Vela (Retell). Dial status: {status or 'unknown'}.",
+        "The caller is being offered voicemail. Check the Retell credit balance and status.",
+    ])
+    action = f"/api/v1/voice/voicemail-done?business_id={business_id}"
+    twiml = (
+        '<?xml version="1.0" encoding="UTF-8"?><Response>'
+        f'<Say voice="{VOICE}">Thanks for calling! We cannot pick up right now. Please leave your name, '
+        'number, and a short message after the tone, and the owner will call you back within 24 hours.</Say>'
+        f'<Record maxLength="120" playBeep="true" action="{escape_xml(action)}" method="POST"/>'
+        f'<Say voice="{VOICE}">We did not get a message. Please call back anytime. Goodbye!</Say>'
+        '</Response>'
+    )
+    return Response(content=twiml, media_type="application/xml")
+
+
+@router.post("/voicemail-done", dependencies=[Depends(verify_twilio)])
+async def voicemail_done(request: Request):
+    form = await request.form()
+    business_id = request.query_params.get("business_id", "")
+    caller = form.get("From", "")
+    rec = form.get("RecordingUrl", "")
+    secs = form.get("RecordingDuration", "0")
+    _voicemail_owner_alert(business_id, f"New voicemail from {caller}", [
+        f"Caller: {caller}", f"Length: {secs} seconds",
+        f"Recording (log in to Twilio to play): {rec}.mp3" if rec else "No recording URL received.",
+    ])
+    return Response(content=f'<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="{VOICE}">Thank you, we got your message. Goodbye!</Say><Hangup/></Response>',
+                    media_type="application/xml")
+
+
+@router.post("/inbound", dependencies=[Depends(verify_twilio)])
 async def inbound_call(request: Request):
     form = await request.form()
     to_number = form.get("To", "")
@@ -135,7 +199,13 @@ async def inbound_call(request: Request):
 
     logger.info(f"Inbound call: from={from_number} to={to_number} sid={call_sid}")
 
-    business = get_business_by_twilio_number(to_number)
+    try:
+        business = get_business_by_twilio_number(to_number)
+    except Exception:
+        # Database outage: don't drop the call. Bridge straight to Retell (the number is
+        # pinned to the agent there) and let the voicemail fallback cover a Retell failure.
+        logger.exception("voice_inbound_lookup_failed; bridging to Retell without DB")
+        return Response(content=_bridge_twiml(from_number, to_number, ""), media_type="application/xml")
     if not business:
         twiml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="{VOICE}">Sorry, this number is not configured. Goodbye.</Say><Hangup/></Response>'
         return Response(content=twiml, media_type="application/xml")
@@ -164,14 +234,8 @@ async def inbound_call(request: Request):
     # the ORIGINAL caller number through so caller-ID / notifications stay intact.
     retell_agent = _get_retell_voice_agent(business_id)
     if retell_agent:
-        sip_uri = f"sip:{to_number}@sip.retellai.com"
-        logger.info(f"voice_bridge_retell: from={from_number} to={to_number} agent={retell_agent} sip={sip_uri}")
-        twiml = (
-            '<?xml version="1.0" encoding="UTF-8"?>'
-            f'<Response><Dial answerOnBridge="true" callerId="{escape_xml(from_number)}" timeout="20">'
-            f'<Sip>{escape_xml(sip_uri)}</Sip></Dial></Response>'
-        )
-        return Response(content=twiml, media_type="application/xml")
+        logger.info(f"voice_bridge_retell: from={from_number} to={to_number} agent={retell_agent}")
+        return Response(content=_bridge_twiml(from_number, to_number, business_id), media_type="application/xml")
 
     config = get_business_chat_config(business_id)
     business_name = escape_xml(config.get("name", "our business")) if config else "our business"
@@ -193,7 +257,7 @@ async def inbound_call(request: Request):
     return Response(content=twiml, media_type="application/xml")
 
 
-@router.post("/respond")
+@router.post("/respond", dependencies=[Depends(verify_twilio)])
 async def respond_to_speech(request: Request):
     form = await request.form()
     speech_result = form.get("SpeechResult", "").strip()
@@ -270,7 +334,7 @@ async def respond_to_speech(request: Request):
     return Response(content=twiml, media_type="application/xml")
 
 
-@router.post("/status")
+@router.post("/status", dependencies=[Depends(verify_twilio)])
 async def call_status(request: Request):
     form = await request.form()
     call_sid = form.get("CallSid", "")

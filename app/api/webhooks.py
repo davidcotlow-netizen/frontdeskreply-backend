@@ -4,7 +4,8 @@ Handles inbound messages from SMS (Twilio), web forms, and chat widgets.
 Returns 200 immediately, enqueues async Celery task.
 """
 
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import Depends, APIRouter, Request, HTTPException
+from app.core.security import verify_twilio
 from datetime import datetime, timezone
 import logging
 
@@ -163,14 +164,28 @@ def _create_message_and_enqueue(
     }).execute()
 
     message_id = msg.data[0]["id"]
-    process_inbound_message.delay(message_id)
-    logger.info(f"Enqueued message {message_id} via {channel_type} (reply via {contact_preference})")
+    try:
+        process_inbound_message.delay(message_id)
+        logger.info(f"Enqueued message {message_id} via {channel_type} (reply via {contact_preference})")
+    except Exception:
+        # No Celery worker/Redis in production: the message is saved, so alert the owner directly
+        # instead of 500ing after the insert (the lead would otherwise sit unseen).
+        logger.exception(f"enqueue_failed message={message_id}; emailing owner instead")
+        try:
+            import html
+            from app.services.notification_service import send_owner_alert
+            who = html.escape(sender_name or sender_identifier or "Someone")
+            send_owner_alert(business_id, f"New {channel_type.replace('_', ' ')} message from {who}",
+                             f"<p><b>From:</b> {who}<br><b>Phone:</b> {html.escape(sender_phone or '-')}"
+                             f"<br><b>Email:</b> {html.escape(sender_email or '-')}</p><p>{html.escape(body or '')}</p>")
+        except Exception:
+            logger.exception("enqueue_fallback_alert_failed")
     return message_id
 
 
 # ── SMS (Twilio) ──────────────────────────────────────────────────────────────
 
-@router.post("/sms")
+@router.post("/sms", dependencies=[Depends(verify_twilio)])
 async def sms_webhook(request: Request):
     settings = get_settings()
     form_data = await request.form()

@@ -12,7 +12,8 @@ import logging
 import time
 from typing import Optional
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import Depends, APIRouter, WebSocket, WebSocketDisconnect
+from app.core.security import require_admin
 
 from app.services.chat_service import (
     create_chat_session,
@@ -93,6 +94,20 @@ async def send_frame(ws: WebSocket, frame: dict):
 
 # ── WebSocket endpoint ───────────────────────────────────────────────────────
 
+# Abuse/cost guards for the public widget
+MAX_MESSAGE_CHARS = 1000
+MAX_AI_REPLIES_PER_SESSION = 40
+MAX_CONNECTIONS_PER_IP = 5
+_ip_connections: dict[str, int] = {}
+
+
+def _client_ip(websocket: WebSocket) -> str:
+    fwd = websocket.headers.get("x-forwarded-for", "")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return websocket.client.host if websocket.client else "unknown"
+
+
 @router.websocket("/ws/chat/{business_id}")
 async def chat_websocket(websocket: WebSocket, business_id: str):
     """
@@ -110,6 +125,23 @@ async def chat_websocket(websocket: WebSocket, business_id: str):
     """
     await websocket.accept()
 
+    client_ip = _client_ip(websocket)
+    if _ip_connections.get(client_ip, 0) >= MAX_CONNECTIONS_PER_IP:
+        logger.warning(f"chat_ws_ip_limit ip={client_ip}")
+        await websocket.close(code=4429, reason="Too many connections")
+        return
+    _ip_connections[client_ip] = _ip_connections.get(client_ip, 0) + 1
+    try:
+        await _chat_websocket_session(websocket, business_id)
+    finally:
+        left = _ip_connections.get(client_ip, 1) - 1
+        if left <= 0:
+            _ip_connections.pop(client_ip, None)
+        else:
+            _ip_connections[client_ip] = left
+
+
+async def _chat_websocket_session(websocket: WebSocket, business_id: str):
     # ── Validate business eligibility ────────────────────────────────
     if not check_business_chat_eligible(business_id):
         await send_frame(websocket, {
@@ -246,8 +278,15 @@ async def chat_websocket(websocket: WebSocket, business_id: str):
                 if msg_type != "message":
                     continue
 
-                content = raw_data.get("content", "").strip()
+                content = (raw_data.get("content") or "").strip()[:MAX_MESSAGE_CHARS]
                 if not content:
+                    continue
+
+                if ai_exchange_count >= MAX_AI_REPLIES_PER_SESSION:
+                    add_chat_message(session_id=session_id, role="visitor", content=content)
+                    limit_msg = ("Thanks so much for chatting! For anything else, email hello@pawtyyoga.com "
+                                 "or leave your name and number here and our owner will get back to you within 24 hours.")
+                    await send_frame(websocket, {"type": "ai_done", "content": limit_msg, "confidence": 1.0})
                     continue
 
                 # Save visitor message
@@ -343,7 +382,7 @@ async def chat_websocket(websocket: WebSocket, business_id: str):
 
 # ── Admin endpoint: relay owner message to visitor ───────────────────────────
 
-@router.post("/api/v1/chat/sessions/{session_id}/message")
+@router.post("/api/v1/chat/sessions/{session_id}/message", dependencies=[Depends(require_admin)])
 async def owner_send_message(session_id: str, body: dict):
     """
     Business owner sends a message to the visitor via REST.
@@ -368,7 +407,7 @@ async def owner_send_message(session_id: str, body: dict):
     return {"status": "saved", "note": "Visitor not currently connected"}
 
 
-@router.post("/api/v1/chat/sessions/{session_id}/takeover")
+@router.post("/api/v1/chat/sessions/{session_id}/takeover", dependencies=[Depends(require_admin)])
 async def takeover_session(session_id: str, body: dict):
     """Owner takes over the chat (Claude stops responding)."""
     from app.services.chat_service import set_human_active
@@ -391,7 +430,7 @@ async def takeover_session(session_id: str, body: dict):
     return {"status": "ok", "human_active": human_active}
 
 
-@router.get("/api/v1/chat/sessions")
+@router.get("/api/v1/chat/sessions", dependencies=[Depends(require_admin)])
 async def list_chat_sessions(business_id: str):
     """List active chat sessions for a business (used by dashboard)."""
     from app.services.chat_service import get_active_sessions
@@ -414,7 +453,7 @@ async def list_chat_sessions(business_id: str):
     return {"sessions": sessions, "count": len(sessions)}
 
 
-@router.get("/api/v1/chat/sessions/{session_id}/messages")
+@router.get("/api/v1/chat/sessions/{session_id}/messages", dependencies=[Depends(require_admin)])
 async def get_chat_messages(session_id: str):
     """Get all messages for a chat session (used by dashboard)."""
     messages = get_session_messages(session_id, limit=200)

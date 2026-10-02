@@ -45,13 +45,15 @@ class Settings(BaseSettings):
     twilio_voice_number: str = ""
     voice_welcome_greeting: str = "Hi! I'm Vela. How can I help you today?"
     voice_max_call_minutes: int = 10
-    retell_api_key: str = "key_2b33b7e079f15e3c8351b40ad0ea"
+    retell_api_key: str = ""  # set RETELL_API_KEY in the environment; never commit keys
     twilio_sip_trunk_sid: str = "TK2047892d4b39a8cdd5ffca1a17b8cab1"
 
     # App
     app_env: str = "development"
+    # Businesses that must never be switched off by plan/billing checks (comma-separated ids)
+    always_on_business_ids: str = "90d3ad7a-bac2-4a20-90ee-39f52db08669"
     frontend_url: str = "http://localhost:3000"
-    api_secret_key: str = "change-me"
+    api_secret_key: str = ""
 
     class Config:
         env_file = ".env"

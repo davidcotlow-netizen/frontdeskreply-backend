@@ -7,9 +7,11 @@ Also provides a sync endpoint to pull existing calls from Retell.
 import logging
 import re
 from datetime import datetime, timezone
-from fastapi import APIRouter, Request
+from fastapi import Depends, APIRouter, Request
+from app.core.security import require_admin, verify_retell
 from fastapi.responses import JSONResponse
 
+from app.core.config import get_settings
 from app.core.database import get_db
 from app.services.voice_service import create_call_session, add_call_transcript, end_call_session
 from app.services.notification_service import send_call_engagement_email
@@ -20,7 +22,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/retell", tags=["retell"])
 
-RETELL_API_KEY = "key_2b33b7e079f15e3c8351b40ad0ea"
 
 
 def parse_transcript_string(transcript_str: str) -> list:
@@ -54,7 +55,7 @@ def extract_source_from_transcript(entries: list) -> str | None:
     return None
 
 
-@router.post("/webhook")
+@router.post("/webhook", dependencies=[Depends(verify_retell)])
 async def retell_webhook(request: Request):
     """
     Retell AI calls this after each call ends.
@@ -74,14 +75,43 @@ async def retell_webhook(request: Request):
     logger.info(f"Retell webhook: event={event} call_id={call_data.get('call_id', '?')}")
 
     if event == "call_ended":
-        await save_retell_call(call_data)
+        # Don't trust the posted payload: confirm the call with Retell and use THEIR copy.
+        # A forged call_ended could otherwise plant fake leads or auto-block a real customer.
+        verified = _fetch_retell_call(call_data.get("call_id", ""))
+        if verified is False:
+            logger.warning(f"retell_webhook_unknown_call call_id={call_data.get('call_id')}: ignored")
+            return {"status": "ignored"}
+        if verified:
+            await save_retell_call(verified)
+        else:  # Retell API unreachable: keep the lead, but never auto-block from unverified data
+            await save_retell_call(call_data, allow_auto_block=False)
     else:
         logger.info(f"Retell webhook ignored: event={event} (only processing call_ended)")
 
     return {"status": "ok"}
 
 
-async def save_retell_call(call_data: dict):
+def _fetch_retell_call(call_id: str):
+    """dict = verified call from Retell; False = Retell says no such call; None = couldn't check."""
+    import httpx
+    key = get_settings().retell_api_key
+    if not call_id or not key:
+        return None if not key else False
+    try:
+        r = httpx.get(f"https://api.retellai.com/v2/get-call/{call_id}",
+                      headers={"Authorization": f"Bearer {key}"}, timeout=10)
+    except Exception:
+        logger.exception("retell_get_call_failed")
+        return None
+    if r.status_code == 200:
+        return r.json()
+    if r.status_code in (400, 404):
+        return False
+    logger.warning(f"retell_get_call_status={r.status_code}")
+    return None
+
+
+async def save_retell_call(call_data: dict, allow_auto_block: bool = True):
     """Save a Retell call and its transcript to Supabase."""
     db = get_db()
     call_id = call_data.get("call_id", "")
@@ -167,7 +197,7 @@ async def save_retell_call(call_data: dict):
     # Send engagement email to business owner
     if business_id:
         try:
-            send_call_engagement_email(business_id, session_id)
+            send_call_engagement_email(business_id, session_id, allow_auto_block=allow_auto_block)
         except Exception as e:
             logger.error(f"Call engagement email failed: {e}")
 
@@ -181,7 +211,7 @@ async def save_retell_call(call_data: dict):
         })
 
 
-@router.post("/dynamic-variables")
+@router.post("/dynamic-variables", dependencies=[Depends(verify_retell)])
 async def retell_dynamic_variables(request: Request):
     """
     Retell calls this before each inbound call to get per-caller context.
@@ -213,7 +243,7 @@ async def retell_dynamic_variables(request: Request):
 
     # Look up caller by phone
     clean = from_number.replace("+1", "").replace("+", "").replace("-", "").replace(" ", "").replace("(", "").replace(")", "")
-    contacts = db.table("contacts").select("name, first_seen_at").eq(
+    contacts = db.table("contacts").select("name, phone, first_seen_at").eq(
         "business_id", business_id
     ).execute()
 
@@ -265,7 +295,7 @@ async def retell_dynamic_variables(request: Request):
     return {"caller_history": history}
 
 
-@router.post("/sync")
+@router.post("/sync", dependencies=[Depends(require_admin)])
 async def sync_retell_calls():
     """
     Pull all recent calls from Retell API and save to Supabase.
@@ -273,7 +303,7 @@ async def sync_retell_calls():
     """
     import httpx
 
-    headers = {"Authorization": f"Bearer {RETELL_API_KEY}", "Content-Type": "application/json"}
+    headers = {"Authorization": f"Bearer {get_settings().retell_api_key}", "Content-Type": "application/json"}
 
     # v3 endpoint (v2 deprecated 06/2026): response is {items, pagination_key, has_more},
     # not a bare array like v2 returned.

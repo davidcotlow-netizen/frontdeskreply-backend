@@ -20,3 +20,9 @@ _check_*.py
 _dump_*.py
 _current_faqs_snapshot.json
 sync_retell_faqs.py
+
+# All local one-off scripts and dumps (may contain keys or customer data)
+_*.py
+_*.txt
+_*.json
+*.bak*

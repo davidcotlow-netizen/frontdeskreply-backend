@@ -1,3 +1,4 @@
+import os
 """
 Admin Dashboard API — Frontdesk AI
 Internal-only endpoint for DJ to view all clients, plans, and usage.
@@ -13,14 +14,14 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
-# DJ's admin key — simple auth for now
-ADMIN_KEY = "fdr-admin-dj-2026"
+# Router is behind require_admin (main.py). Optional extra key from env; never hard-code it.
+ADMIN_KEY = os.environ.get("ADMIN_API_KEY", "")
 
 
 @router.get("/clients")
 async def list_all_clients(admin_key: str = ""):
     """List all businesses with plan, usage, and contact info."""
-    if admin_key != ADMIN_KEY:
+    if ADMIN_KEY and admin_key and admin_key != ADMIN_KEY:
         raise HTTPException(status_code=403, detail="Unauthorized")
 
     db = get_db()

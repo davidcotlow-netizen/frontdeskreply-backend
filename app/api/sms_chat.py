@@ -5,7 +5,8 @@ Same FAQ-powered AI as voice and chat, but via text message.
 """
 
 import logging
-from fastapi import APIRouter, Request, Response
+from fastapi import Depends, APIRouter, Request, Response
+from app.core.security import verify_twilio
 
 from app.services.voice_service import get_business_by_twilio_number
 from app.services.chat_service import get_business_chat_config, _find_or_create_contact
@@ -19,7 +20,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/sms-chat", tags=["sms-chat"])
 
 
-@router.post("/inbound")
+@router.post("/inbound", dependencies=[Depends(verify_twilio)])
 async def sms_inbound(request: Request):
     """
     Twilio hits this when an SMS arrives.

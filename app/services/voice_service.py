@@ -144,15 +144,21 @@ def get_business_by_twilio_number(phone_number: str) -> Optional[dict]:
 
 def check_business_voice_eligible(business_id: str) -> bool:
     """Check if business is on Pro tier (voice is Pro-only)."""
-    db = get_db()
-    plan_res = db.table("subscription_plans").select(
-        "plan_tier"
-    ).eq("business_id", business_id).eq("status", "active").maybe_single().execute()
-
-    if not plan_res or not plan_res.data:
+    from app.core.config import get_settings
+    always_on = {b.strip() for b in get_settings().always_on_business_ids.split(",") if b.strip()}
+    if business_id in always_on:
+        return True  # never let a billing row glitch take a live business offline
+    try:
+        db = get_db()
+        plan_res = db.table("subscription_plans").select(
+            "plan_tier"
+        ).eq("business_id", business_id).eq("status", "active").limit(1).execute()
+    except Exception:
         return False
-
-    return plan_res.data.get("plan_tier") in ("pro", "enterprise")
+    rows = plan_res.data or []
+    if not rows:
+        return False
+    return rows[0].get("plan_tier") in ("pro", "enterprise")
 
 
 # ── Call history for dashboard ───────────────────────────────────────────────

@@ -10,7 +10,8 @@ We receive the email, Vela generates a response, and we reply using the branded 
 import logging
 import re
 from datetime import datetime, timezone
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import Depends, APIRouter, Request, HTTPException
+from app.core.security import require_admin
 
 from app.core.database import get_db
 from app.services.chat_service import get_business_chat_config, _find_or_create_contact
@@ -22,7 +23,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/email-inbound", tags=["email-inbound"])
 
 
-@router.post("/receive")
+@router.post("/receive", dependencies=[Depends(require_admin)])
 async def receive_email(request: Request):
     """
     Receives inbound emails (via Resend webhook or direct POST).
@@ -145,7 +146,7 @@ async def receive_email(request: Request):
     return {"status": "replied", "to": sender_email, "session_id": session_id}
 
 
-@router.post("/receive/{business_id}")
+@router.post("/receive/{business_id}", dependencies=[Depends(require_admin)])
 async def receive_email_by_id(business_id: str, request: Request):
     """
     Alternative endpoint with business_id in the URL.

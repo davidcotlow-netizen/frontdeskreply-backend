@@ -5,7 +5,8 @@ Lets business owners manage their profile, hours, FAQs, and emergency contact.
 
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import Depends, APIRouter, HTTPException
+from app.core.security import require_admin
 from pydantic import BaseModel
 from typing import Optional, List
 from app.core.database import get_db
@@ -224,7 +225,7 @@ def _sync_retell_prompt(business_id: str) -> dict:
 
 # ── Business Profile ──────────────────────────────────────────────────────────
 
-@router.get("/profile")
+@router.get("/profile", dependencies=[Depends(require_admin)])
 async def get_profile(business_id: str):
     db = get_db()
     res = db.table("businesses").select("*").eq("id", business_id).maybe_single().execute()
@@ -233,7 +234,7 @@ async def get_profile(business_id: str):
     return res.data
 
 
-@router.patch("/profile")
+@router.patch("/profile", dependencies=[Depends(require_admin)])
 async def update_profile(business_id: str, body: BusinessProfileUpdate):
     db = get_db()
     updates = {k: v for k, v in body.dict().items() if v is not None and v != ""}
@@ -245,7 +246,7 @@ async def update_profile(business_id: str, body: BusinessProfileUpdate):
 
 # ── FAQs ──────────────────────────────────────────────────────────────────────
 
-@router.post("/faqs/sync-voice")
+@router.post("/faqs/sync-voice", dependencies=[Depends(require_admin)])
 async def sync_voice_faqs(business_id: str):
     """Push current FAQs to Retell Voice AI. Returns sync status and FAQ count."""
     result = _sync_retell_prompt(business_id)
@@ -254,14 +255,14 @@ async def sync_voice_faqs(business_id: str):
     return result
 
 
-@router.get("/faqs")
+@router.get("/faqs", dependencies=[Depends(require_admin)])
 async def get_faqs(business_id: str):
     db = get_db()
     res = db.table("faqs").select("*").eq("business_id", business_id).order("category").execute()
     return {"faqs": res.data or []}
 
 
-@router.post("/faqs")
+@router.post("/faqs", dependencies=[Depends(require_admin)])
 async def create_faq(business_id: str, body: FAQItem):
     db = get_db()
     res = db.table("faqs").insert({
@@ -275,7 +276,7 @@ async def create_faq(business_id: str, body: FAQItem):
     return {"status": "created", "faq": res.data[0], "voice_sync": sync}
 
 
-@router.patch("/faqs/{faq_id}")
+@router.patch("/faqs/{faq_id}", dependencies=[Depends(require_admin)])
 async def update_faq(faq_id: str, business_id: str, body: FAQItem):
     db = get_db()
     res = db.table("faqs").update({
@@ -288,7 +289,7 @@ async def update_faq(faq_id: str, business_id: str, body: FAQItem):
     return {"status": "updated", "voice_sync": sync}
 
 
-@router.delete("/faqs/{faq_id}")
+@router.delete("/faqs/{faq_id}", dependencies=[Depends(require_admin)])
 async def delete_faq(faq_id: str, business_id: str):
     db = get_db()
     db.table("faqs").delete().eq("id", faq_id).eq("business_id", business_id).execute()
@@ -301,7 +302,7 @@ class BulkFAQImport(BaseModel):
     replace: bool = True  # True = delete existing FAQs first
 
 
-@router.post("/faqs/bulk")
+@router.post("/faqs/bulk", dependencies=[Depends(require_admin)])
 async def bulk_import_faqs(business_id: str, body: BulkFAQImport):
     """
     Bulk import FAQs — inserts all FAQs then syncs to Retell ONCE.
@@ -333,7 +334,7 @@ class AutoRespondUpdate(BaseModel):
     auto_respond_enabled: bool
 
 
-@router.get("/auto-respond")
+@router.get("/auto-respond", dependencies=[Depends(require_admin)])
 async def get_auto_respond(business_id: str):
     db = get_db()
     res = db.table("businesses").select(
@@ -344,7 +345,7 @@ async def get_auto_respond(business_id: str):
     return {"auto_respond_enabled": res.data.get("auto_respond_enabled", False)}
 
 
-@router.patch("/auto-respond")
+@router.patch("/auto-respond", dependencies=[Depends(require_admin)])
 async def update_auto_respond(business_id: str, body: AutoRespondUpdate):
     db = get_db()
     db.table("businesses").update({
@@ -365,7 +366,7 @@ class WidgetBrandingUpdate(BaseModel):
     show_powered_by: Optional[bool] = None
 
 
-@router.get("/widget-branding")
+@router.get("/widget-branding", dependencies=[Depends(require_admin)])
 async def get_widget_branding(business_id: str):
     db = get_db()
     biz = db.table("businesses").select("metadata").eq("id", business_id).maybe_single().execute()
@@ -381,7 +382,7 @@ async def get_widget_branding(business_id: str):
     }
 
 
-@router.patch("/widget-branding")
+@router.patch("/widget-branding", dependencies=[Depends(require_admin)])
 async def update_widget_branding(business_id: str, body: WidgetBrandingUpdate):
     db = get_db()
 
@@ -404,7 +405,7 @@ async def update_widget_branding(business_id: str, body: WidgetBrandingUpdate):
     return {"status": "updated", **meta}
 
 
-@router.patch("/widget-proactive")
+@router.patch("/widget-proactive", dependencies=[Depends(require_admin)])
 async def update_proactive_settings(business_id: str, body: dict):
     """Update proactive chat trigger delay. Growth+ only."""
     db = get_db()
@@ -465,7 +466,7 @@ async def get_widget_config(business_id: str):
     }
 
 
-@router.get("/booking")
+@router.get("/booking", dependencies=[Depends(require_admin)])
 async def get_booking_settings(business_id: str):
     db = get_db()
     biz = db.table("businesses").select("metadata").eq("id", business_id).maybe_single().execute()
@@ -478,7 +479,7 @@ async def get_booking_settings(business_id: str):
     }
 
 
-@router.patch("/booking")
+@router.patch("/booking", dependencies=[Depends(require_admin)])
 async def update_booking_settings(business_id: str, body: dict):
     db = get_db()
     plan_res = db.table("subscription_plans").select("plan_tier").eq(
@@ -496,7 +497,7 @@ async def update_booking_settings(business_id: str, body: dict):
 
 # ── Notification Preferences ────────────────────────────────────────────────
 
-@router.get("/notifications")
+@router.get("/notifications", dependencies=[Depends(require_admin)])
 async def get_notification_prefs(business_id: str):
     """Get notification preferences for a business."""
     db = get_db()
@@ -516,7 +517,7 @@ async def get_notification_prefs(business_id: str):
     return {"notify_on_chat": True, "notify_on_call": True, "notify_on_sms": True, "weekly_report_enabled": True}
 
 
-@router.patch("/notifications")
+@router.patch("/notifications", dependencies=[Depends(require_admin)])
 async def update_notification_prefs(business_id: str, body: dict):
     """Update notification preferences. Plan-gated on backend."""
     db = get_db()
@@ -580,7 +581,7 @@ async def update_notification_prefs(business_id: str, body: dict):
 ELIGIBLE_EMAIL_PLANS = ("growth", "pro", "enterprise")
 
 
-@router.get("/email-status")
+@router.get("/email-status", dependencies=[Depends(require_admin)])
 async def email_status(business_id: str):
     """Check if email auto-reply is enabled for a business."""
     db = get_db()
@@ -598,7 +599,7 @@ async def email_status(business_id: str):
     return {"enabled": False, "forwarding_address": ""}
 
 
-@router.post("/email-enable")
+@router.post("/email-enable", dependencies=[Depends(require_admin)])
 async def email_enable(business_id: str):
     """Enable email auto-reply. Creates an email channel. Growth+ only."""
     db = get_db()
@@ -636,7 +637,7 @@ async def email_enable(business_id: str):
     return {"status": "enabled", "forwarding_address": forwarding}
 
 
-@router.post("/email-disable")
+@router.post("/email-disable", dependencies=[Depends(require_admin)])
 async def email_disable(business_id: str):
     """Disable email auto-reply."""
     db = get_db()
@@ -647,7 +648,7 @@ async def email_disable(business_id: str):
     return {"status": "disabled"}
 
 
-@router.post("/email-test")
+@router.post("/email-test", dependencies=[Depends(require_admin)])
 async def email_test(business_id: str):
     """Send a test email so the business owner can see Vela's response."""
     db = get_db()
@@ -695,7 +696,7 @@ async def email_test(business_id: str):
 
 # ── Outbound Webhooks (Zapier/Make — Growth+) ──────────────────────────────
 
-@router.get("/webhooks-config")
+@router.get("/webhooks-config", dependencies=[Depends(require_admin)])
 async def get_webhooks_config(business_id: str):
     """Get outbound webhook URL for automation integrations."""
     db = get_db()
@@ -707,7 +708,7 @@ async def get_webhooks_config(business_id: str):
     }
 
 
-@router.patch("/webhooks-config")
+@router.patch("/webhooks-config", dependencies=[Depends(require_admin)])
 async def update_webhooks_config(business_id: str, body: dict):
     """Set outbound webhook URL for Zapier/Make. Growth+ only."""
     db = get_db()
@@ -734,7 +735,7 @@ import hashlib
 import secrets as _secrets
 
 
-@router.get("/api-keys")
+@router.get("/api-keys", dependencies=[Depends(require_admin)])
 async def list_api_keys(business_id: str):
     """List API keys for a business (prefix only). Enterprise only."""
     db = get_db()
@@ -752,7 +753,7 @@ async def list_api_keys(business_id: str):
     return {"keys": keys.data or []}
 
 
-@router.post("/api-keys")
+@router.post("/api-keys", dependencies=[Depends(require_admin)])
 async def create_api_key(business_id: str, body: dict = None):
     """Generate a new API key. Enterprise only. Returns full key ONCE."""
     db = get_db()
@@ -787,7 +788,7 @@ async def create_api_key(business_id: str, body: dict = None):
     }
 
 
-@router.delete("/api-keys/{key_id}")
+@router.delete("/api-keys/{key_id}", dependencies=[Depends(require_admin)])
 async def revoke_api_key(key_id: str, business_id: str):
     """Revoke (deactivate) an API key. Enterprise only."""
     db = get_db()
